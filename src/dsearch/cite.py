@@ -6,12 +6,54 @@ summarises, or completes it.
 
 from __future__ import annotations
 
-from dsearch.chunk import Chunk
-from dsearch.index import SourceMeta
-from dsearch.search import Result
+import re
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # Annotations only: `index` imports this module at add time.
+    from dsearch.chunk import Chunk
+    from dsearch.index import SourceMeta
+    from dsearch.search import Result
 
 # MLA abbreviates a list of three or more authors to the first plus "et al."
 MAX_NAMED_AUTHORS = 2
+
+# Filename separators that stand in for spaces, and the letter/digit seam in
+# names such as "Chapter5" or "Holmes2013".
+_FILENAME_SEPARATOR_RE = re.compile(r"[_\-]+")
+_LETTER_DIGIT_SEAM_RE = re.compile(r"(?<=[A-Za-z])(?=\d)|(?<=\d)(?=[A-Za-z])")
+
+
+def title_from_filename(filename: str) -> str:
+    """A readable title from a filename.
+
+    "fresh_fruit-broken_bodies.pdf" -> "Fresh Fruit Broken Bodies", and
+    "Chapter5.pdf" -> "Chapter 5". Only the first letter of each word is
+    raised, so "don't" does not become "Don'T" and an acronym such as "FFBB"
+    keeps its capitals.
+    """
+    stem = Path(filename).stem
+    words = _LETTER_DIGIT_SEAM_RE.sub(" ", _FILENAME_SEPARATOR_RE.sub(" ", stem))
+    return " ".join(word[:1].upper() + word[1:] for word in words.split())
+
+
+def resolve_author(explicit: str | None, pdf_author: str | None) -> str:
+    """The author to cite: the `--author` flag, else the PDF's metadata, else nothing.
+
+    There is no filename fallback for an author — a filename is a title at
+    best, and a citation with an invented author is worse than one with none.
+    """
+    return (explicit or "").strip() or (pdf_author or "").strip()
+
+
+def resolve_title(explicit: str | None, pdf_title: str | None, filename: str) -> str:
+    """The title to cite: the `--title` flag, else the PDF's metadata, else the filename.
+
+    The chapter title is never a candidate: it names a part of the work, and
+    MLA cites the work.
+    """
+    return (explicit or "").strip() or (pdf_title or "").strip() or title_from_filename(filename)
+
 
 # Straight quotes in, typographic quotes out — this text is pasted into essays.
 OPEN_QUOTE = "“"
@@ -107,23 +149,31 @@ def parenthetical(result: Result, meta: SourceMeta | None = None) -> str:
     return f"({inner})" if inner else ""
 
 
-def citation_block(result: Result, meta: SourceMeta | None = None) -> str:
-    """The quotation and its citation, ready to paste into an essay.
+def quoted_line(result: Result, meta: SourceMeta | None = None) -> str:
+    """The best sentence in quotation marks, followed by its in-text citation.
 
-    The quotation keeps its own terminal punctuation inside the quotation marks;
-    the in-text citation follows, then the full reference on the next line.
+    A final period moves outside the closing quotation mark, after the
+    parenthetical, as MLA 9 requires; a question mark or exclamation point
+    stays inside and a period is added after the parenthetical.
     """
     source = meta or result.meta
     sentence = result.best_sentence_text.strip()
     inline = parenthetical(result, source)
 
     if not inline:
-        quoted = quotation(result)
-    elif sentence.endswith(_DROPPED_TERMINAL):
-        quoted = f"{OPEN_QUOTE}{sentence[:-1]}{CLOSE_QUOTE} {inline}."
-    else:
-        # Covers a kept "?"/"!" and a sentence with no terminal punctuation at
-        # all (a fragment split by a page break), which read the same way.
-        quoted = f"{OPEN_QUOTE}{sentence}{CLOSE_QUOTE} {inline}."
+        return quotation(result)
+    if sentence.endswith(_DROPPED_TERMINAL):
+        return f"{OPEN_QUOTE}{sentence[:-1]}{CLOSE_QUOTE} {inline}."
+    # Covers a kept "?"/"!" and a sentence with no terminal punctuation at all
+    # (a fragment split by a page break), which read the same way.
+    return f"{OPEN_QUOTE}{sentence}{CLOSE_QUOTE} {inline}."
 
-    return f"{quoted}\n{mla(result, source)}"
+
+def citation_block(result: Result, meta: SourceMeta | None = None) -> str:
+    """The citation and the quotation, ready to paste into an essay.
+
+    Line one is the full reference (`Author. *Title*. p. N.`); line two is the
+    best-matching sentence in quotation marks.
+    """
+    source = meta or result.meta
+    return f"{mla(result, source)}\n{quoted_line(result, source)}"

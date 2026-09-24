@@ -21,7 +21,7 @@ from rich.text import Text
 
 from dsearch import __version__
 from dsearch.chunk import DEFAULT_OVERLAP, DEFAULT_SIZE
-from dsearch.cite import mla, parenthetical
+from dsearch.cite import mla, quoted_line
 from dsearch.extract import NoTextLayerError
 from dsearch.index import (
     DEFAULT_TIER,
@@ -34,6 +34,9 @@ from dsearch.index import (
 )
 from dsearch.index import (
     add as index_add,
+)
+from dsearch.index import (
+    edit as index_edit,
 )
 from dsearch.index import (
     list_sources as index_list,
@@ -104,22 +107,18 @@ def _body(result: Result) -> Group:
 
 
 def _panel(result: Result, position: int) -> Panel:
-    citation = mla(result)
-    inline = parenthetical(result)
-    footer = f"[green]{citation}[/green]"
-    if inline:
-        footer += f"  [dim]in-text: {inline}[/dim]"
+    """A result panel: passage, then the reference line and the quotable line."""
+    footer = Group(
+        Text(mla(result), style="green"),
+        Text(quoted_line(result), style="dim"),
+    )
     return Panel(
-        Group(_body(result), Text(), _render_markup(footer)),
+        Group(_body(result), Text(), footer),
         title=f"[dim]{position}.[/dim] {_header(result)}",
         title_align="left",
         border_style="blue",
         padding=(1, 2),
     )
-
-
-def _render_markup(markup: str) -> Text:
-    return Text.from_markup(markup)
 
 
 class _PageColumn(ProgressColumn):
@@ -240,6 +239,23 @@ def list_command() -> None:
         )
     console.print(table)
     console.print(f"\n[dim]{len(sources)} source(s) in {home()}[/dim]")
+
+
+@app.command()
+def edit(
+    source: Annotated[str, typer.Argument(help="Source id, filename, or title.")],
+    author: Annotated[str | None, typer.Option(help="New author, for citations.")] = None,
+    title: Annotated[str | None, typer.Option(help="New title, for citations.")] = None,
+) -> None:
+    """Change a source's author or title. Chunks and vectors are untouched."""
+    try:
+        meta = index_edit(source, author=author, title=title)
+    except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+        _fail(str(exc))
+    console.print(
+        f"[green]Updated[/green] ({meta.short_id}) — "
+        f"[bold]{meta.title}[/bold] by {meta.author or '[dim]unknown[/dim]'}."
+    )
 
 
 @app.command()

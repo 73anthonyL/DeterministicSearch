@@ -12,6 +12,10 @@ from dsearch.cite import (
     page_reference,
     parenthetical,
     quotation,
+    quoted_line,
+    resolve_author,
+    resolve_title,
+    title_from_filename,
 )
 from dsearch.index import SourceMeta
 from dsearch.search import Result
@@ -142,31 +146,79 @@ class TestParenthetical:
         assert parenthetical(make_result(author="", printed=None)) == ""
 
 
-class TestCitationBlock:
+class TestQuotedLine:
     def test_places_the_page_reference_outside_the_quotation(self):
         # MLA: closing quote, then the parenthetical, then the period.
-        block = citation_block(make_result())
-        assert block.splitlines()[0] == "“The clinic dismissed his knee pain” (Holmes 47)."
-
-    def test_full_reference_on_the_second_line(self):
-        assert citation_block(make_result()).splitlines()[1] == (
-            "Holmes, Seth. *Fresh Fruit, Broken Bodies*. p. 47."
-        )
+        assert quoted_line(make_result()) == "“The clinic dismissed his knee pain” (Holmes 47)."
 
     def test_handles_a_sentence_without_terminal_punctuation(self):
-        block = citation_block(make_result(sentences=["A fragment with no period"]))
-        assert block.splitlines()[0] == "“A fragment with no period” (Holmes 47)."
+        line = quoted_line(make_result(sentences=["A fragment with no period"]))
+        assert line == "“A fragment with no period” (Holmes 47)."
 
     def test_keeps_a_question_mark_inside_the_quotation(self):
         # MLA 9: a question mark belongs to the quoted words, so it stays inside
         # and a period follows the parenthetical. Only a period is moved out.
-        block = citation_block(make_result(sentences=["Is it worth risking your life?"]))
-        assert block.splitlines()[0] == "“Is it worth risking your life?” (Holmes 47)."
+        line = quoted_line(make_result(sentences=["Is it worth risking your life?"]))
+        assert line == "“Is it worth risking your life?” (Holmes 47)."
 
     def test_keeps_an_exclamation_inside_the_quotation(self):
-        block = citation_block(make_result(sentences=["We are field workers!"]))
-        assert block.splitlines()[0] == "“We are field workers!” (Holmes 47)."
+        line = quoted_line(make_result(sentences=["We are field workers!"]))
+        assert line == "“We are field workers!” (Holmes 47)."
 
     def test_falls_back_to_a_plain_quotation_when_nothing_is_known(self):
-        block = citation_block(make_result(author="", printed=None))
-        assert block.splitlines()[0] == f"“{SENTENCE}”"
+        assert quoted_line(make_result(author="", printed=None)) == f"“{SENTENCE}”"
+
+
+class TestCitationBlock:
+    def test_reference_line_first_then_the_quotation(self):
+        lines = citation_block(make_result()).splitlines()
+        assert lines == [
+            "Holmes, Seth. *Fresh Fruit, Broken Bodies*. p. 47.",
+            "“The clinic dismissed his knee pain” (Holmes 47).",
+        ]
+
+    def test_never_uses_the_chapter(self):
+        # The chunk carries chapter="Chapter 3"; it names a part, not the work.
+        assert "Chapter 3" not in citation_block(make_result())
+
+
+class TestTitleFromFilename:
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [
+            ("Chapter5.pdf", "Chapter 5"),
+            ("fresh_fruit-broken_bodies.pdf", "Fresh Fruit Broken Bodies"),
+            ("Holmes2013.pdf", "Holmes 2013"),
+            ("FFBB.pdf", "FFBB"),
+            ("don't_panic.pdf", "Don't Panic"),
+            ("/tmp/uploads/book.PDF", "Book"),
+        ],
+    )
+    def test_strips_extension_and_title_cases(self, filename, expected):
+        assert title_from_filename(filename) == expected
+
+
+class TestResolution:
+    """Author and title: flag, then PDF metadata, then filename — nothing else."""
+
+    def test_explicit_flag_wins(self):
+        assert resolve_author("Seth Holmes", "PDF Author") == "Seth Holmes"
+        assert resolve_title("Fresh Fruit", "PDF Title", "file.pdf") == "Fresh Fruit"
+
+    def test_pdf_metadata_is_second(self):
+        assert resolve_author(None, "PDF Author") == "PDF Author"
+        assert resolve_title(None, "PDF Title", "file.pdf") == "PDF Title"
+
+    def test_blank_flag_counts_as_absent(self):
+        assert resolve_author("   ", "PDF Author") == "PDF Author"
+        assert resolve_title("", "PDF Title", "file.pdf") == "PDF Title"
+
+    def test_filename_is_the_last_resort_for_the_title(self):
+        assert resolve_title(None, "", "fresh_fruit.pdf") == "Fresh Fruit"
+        assert resolve_title(None, None, "Chapter5.pdf") == "Chapter 5"
+
+    def test_author_has_no_filename_fallback(self):
+        # A filename is at best a title; inventing an author from it would put a
+        # wrong name in someone's works-cited list.
+        assert resolve_author(None, "") == ""
+        assert resolve_author(None, None) == ""

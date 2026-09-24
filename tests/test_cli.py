@@ -65,7 +65,7 @@ class TestHelpAndVersion:
     def test_help_lists_every_command(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        for command in ("add", "list", "remove", "search"):
+        for command in ("add", "edit", "list", "remove", "search"):
             assert command in result.output
 
     def test_version(self):
@@ -132,6 +132,29 @@ class TestList:
         assert "unknown" in runner.invoke(app, ["list"]).output
 
 
+class TestEdit:
+    def test_updates_the_citation(self, book):
+        runner.invoke(app, ["add", str(book)])
+        result = runner.invoke(
+            app,
+            ["edit", "ffbb", "--author", "Seth Holmes", "--title", "Fresh Fruit, Broken Bodies"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Updated" in result.output
+        out = runner.invoke(app, ["search", "knee pain clinic", "--k", "1"]).output
+        assert "Holmes, Seth. *Fresh Fruit, Broken Bodies*. p. 4" in out
+
+    def test_nothing_to_change_is_a_clean_error(self, added):
+        result = runner.invoke(app, ["edit", "ffbb"])
+        assert result.exit_code == 1
+        assert "Nothing to change" in result.output
+
+    def test_unknown_source_is_a_clean_error(self, added):
+        result = runner.invoke(app, ["edit", "nope", "--title", "x"])
+        assert result.exit_code == 1
+        assert "Traceback" not in result.output
+
+
 class TestRemove:
     def test_removes_and_confirms(self, added):
         source_id = index.list_sources()[0].short_id
@@ -157,7 +180,7 @@ class TestSearch:
     def test_honours_k(self, added):
         few = runner.invoke(app, ["search", "strawberry rows", "--k", "1"]).output
         many = runner.invoke(app, ["search", "strawberry rows", "--k", "4"]).output
-        assert many.count("in-text:") > few.count("in-text:")
+        assert many.count("Holmes, Seth.") > few.count("Holmes, Seth.")
 
     def test_search_deeper_path(self, added):
         result = runner.invoke(app, ["search", "field", "--k", "20"])

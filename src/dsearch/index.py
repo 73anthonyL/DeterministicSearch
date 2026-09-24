@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from dsearch.chunk import DEFAULT_OVERLAP, DEFAULT_SIZE, Chunk, chunk
+from dsearch.cite import resolve_author, resolve_title
 from dsearch.extract import extract
 
 # Embedding quality tiers, from the spec.
@@ -178,10 +179,19 @@ def save_library(sources: Iterable[SourceMeta]) -> None:
 
 
 def save_meta(meta: SourceMeta) -> None:
-    """Persist one source's metadata to its folder and to the library listing."""
+    """Persist one source's metadata to its folder and to the library listing.
+
+    A known source keeps its place in the listing (which is insertion order);
+    a new one is appended.
+    """
     _write_json(source_dir(meta.source_id) / "meta.json", meta.to_dict())
-    others = [s for s in load_library() if s.source_id != meta.source_id]
-    save_library([*others, meta])
+    library = load_library()
+    slot = next((i for i, s in enumerate(library) if s.source_id == meta.source_id), None)
+    if slot is None:
+        library.append(meta)
+    else:
+        library[slot] = meta
+    save_library(library)
 
 
 def is_stale(meta: SourceMeta) -> bool:
@@ -336,8 +346,8 @@ def _meta_from_pdf(
     return SourceMeta(
         source_id=source_id,
         filename=path.name,
-        title=(title or pdf_title.strip() or path.stem),
-        author=(author or pdf_author.strip() or ""),
+        title=resolve_title(title, pdf_title, path.name),
+        author=resolve_author(author, pdf_author),
         added=date.today().isoformat(),
         page_count=page_count,
         index_version=INDEX_VERSION,
@@ -511,6 +521,28 @@ def add(
         warning=_library_warning(len(load_library())),
         reindexed=reindexed,
     )
+
+
+def edit(
+    identifier: str,
+    *,
+    author: str | None = None,
+    title: str | None = None,
+) -> SourceMeta:
+    """Change a source's author and/or title without touching chunks or vectors.
+
+    An argument left as None is kept; an empty string clears it. Raises
+    ValueError if neither is given, so a typo in the flags is not a silent no-op.
+    """
+    if author is None and title is None:
+        raise ValueError("Nothing to change: pass --author and/or --title.")
+    meta = resolve_source(identifier)
+    if author is not None:
+        meta.author = author.strip()
+    if title is not None:
+        meta.title = title.strip()
+    save_meta(meta)
+    return meta
 
 
 def remove(identifier: str) -> SourceMeta:

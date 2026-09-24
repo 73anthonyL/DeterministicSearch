@@ -252,3 +252,33 @@ defended or reversed on purpose.
   neither.
 - **Author and title survive a rebuild.** They may have been set by hand and
   are metadata about the book, not about the text pipeline.
+
+### Citation fallback
+
+- **The "Chapter5. p. 153." line was the filename fallback, not the chapter
+  field.** `cite.py` never read `chunk.chapter`; `Chapter5.pdf` carried no PDF
+  metadata, so its stem became the title. The fix is threefold: the fallback
+  now produces "Chapter 5" (readable, and visibly a placeholder), `dsearch edit`
+  sets the real author and title, and a test asserts the chapter can never
+  appear in a citation.
+- **Resolution lives in `cite.py` and is applied once, at add time.** `index`
+  calls `resolve_author`/`resolve_title` when a source is created, and
+  `meta.json` stores the outcome. Re-resolving on every search would mean
+  re-opening the PDF for its metadata at query time; storing the result means
+  `edit` is a plain overwrite. `cite` imports `index`/`search` types only
+  under `TYPE_CHECKING` so that `index` can import `cite` without a cycle.
+- **No filename fallback for the author.** A filename is at best a title.
+  Putting "Chapter 5" in the author slot of a works-cited entry would be worse
+  than leaving it blank, which MLA permits.
+- **Filename title-casing raises only the first letter of each word** and
+  splits `_`, `-`, and letter/digit seams. `str.title()` would produce "Don'T"
+  and lowercase an acronym.
+- **`citation_block` is now reference first, quotation second, and the
+  quotation keeps its in-text parenthetical.** The spec fixes the order; the
+  parenthetical is retained because it is the form that goes into the essay
+  body and dropping it would remove the most-pasted line. The CLI footer
+  prints the same two lines.
+- **`edit` refuses a call with neither flag** rather than silently succeeding,
+  so a mistyped `--tittle` is caught.
+- **`edit` keeps the source's position in `dsearch list`.** `save_meta`
+  replaces the row in place; a rename should not look like a re-add.

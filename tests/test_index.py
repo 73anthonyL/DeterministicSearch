@@ -117,7 +117,7 @@ class TestAdd:
     def test_falls_back_to_filename(self, pdf_factory):
         path = pdf_factory(name="Chapter3.pdf", pages=[BODY] * 3)
         meta = index.add(path).meta
-        assert meta.title == "Chapter3"
+        assert meta.title == "Chapter 3"
         assert meta.author == ""
 
     def test_flags_beat_pdf_metadata(self, pdf_factory):
@@ -395,3 +395,42 @@ class TestIndexVersion:
         index.upgrade_stale(index.list_sources(), notify=lines.append)
         assert stub_embeddings["texts"] == texts_before
         assert lines == []
+
+
+class TestEdit:
+    def test_updates_author_and_title_in_both_places(self, book):
+        meta = index.add(book).meta
+        edited = index.edit(meta.short_id, author="Seth Holmes", title="Fresh Fruit, Broken Bodies")
+        assert (edited.author, edited.title) == ("Seth Holmes", "Fresh Fruit, Broken Bodies")
+        assert index.list_sources()[0].author == "Seth Holmes"
+        stored = json.loads((index.source_dir(meta.source_id) / "meta.json").read_text())
+        assert stored["title"] == "Fresh Fruit, Broken Bodies"
+
+    def test_leaves_the_other_field_alone(self, book):
+        meta = index.add(book, author="Seth Holmes", title="Original").meta
+        assert index.edit(meta.short_id, title="Changed").author == "Seth Holmes"
+        assert index.edit(meta.short_id, author="Someone Else").title == "Changed"
+
+    def test_does_not_touch_chunks_or_vectors(self, book):
+        meta = index.add(book).meta
+        chunks = (index.source_dir(meta.source_id) / "chunks.jsonl").read_bytes()
+        vectors = index.vectors_path(meta.source_id, "fast").read_bytes()
+        index.edit(meta.short_id, title="Renamed")
+        assert (index.source_dir(meta.source_id) / "chunks.jsonl").read_bytes() == chunks
+        assert index.vectors_path(meta.source_id, "fast").read_bytes() == vectors
+
+    def test_requires_something_to_change(self, book):
+        meta = index.add(book).meta
+        with pytest.raises(ValueError, match="Nothing to change"):
+            index.edit(meta.short_id)
+
+    def test_unknown_source(self, book):
+        index.add(book)
+        with pytest.raises(index.SourceNotFoundError):
+            index.edit("nope", title="x")
+
+    def test_preserves_library_order(self, pdf_factory):
+        for n in (1, 2, 3):
+            index.add(pdf_factory(name=f"book{n}.pdf", pages=[f"{BODY} Book {n}."] * 3))
+        index.edit("book1", title="First")
+        assert [s.filename for s in index.list_sources()] == ["book1.pdf", "book2.pdf", "book3.pdf"]
