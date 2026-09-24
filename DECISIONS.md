@@ -95,3 +95,34 @@ defended or reversed on purpose.
   something.
 - **The >10 source warning is attached to the `AddResult`**, not printed from the
   library layer, so the CLI and the Streamlit app each render it their own way.
+
+## Search
+
+- **The two rankers treat a zero score differently, and this is deliberate.** A
+  BM25 score of zero means not one query term appears in the chunk — no evidence
+  — so that chunk earns no rank and contributes nothing to the fusion. A low
+  cosine is still a meaningful ordering, so the dense ranker ranks every chunk.
+  An earlier version let any rank-1 chunk through regardless of score, which let
+  a zero-scoring chunk tie and then beat a genuine keyword-only match.
+- **RRF constant 60 and a 200-candidate pool.** 60 is the value from the
+  original RRF paper. The pool is much wider than any realistic `k` so that a
+  passage found by only one of the two rankers still reaches the fusion.
+- **Fusion is over ranks, not scores**, because an unbounded BM25 score and a
+  cosine in [-1, 1] cannot be added meaningfully.
+- **`Result` also carries `meta`**, the source's `SourceMeta`. The spec lists
+  chunk, score, best-sentence index, and neighbours; citation and display both
+  need the title and author, and threading the metadata through avoids a library
+  lookup per rendered result.
+- **The best-matching sentence is computed only for the k returned chunks**, by
+  embedding their sentences at query time. Storing per-sentence vectors for the
+  whole library would multiply index size several-fold to save milliseconds on a
+  handful of results.
+- **A long query's chunk score is the max over its sentence embeddings, not the
+  mean.** Averaging a 100-word paragraph dilutes the one sentence that matters;
+  max makes the paragraph behave like a set of separate questions, which is what
+  a student pasting their own thinking actually wants.
+- **A source with no vectors at the requested tier is skipped and named in
+  `Corpus.skipped`, not fatal.** One book not yet upgraded to `best` should not
+  block searching the rest of the library.
+- **Context neighbours stop at a source boundary**, so the passage above a
+  result is never from a different book.
