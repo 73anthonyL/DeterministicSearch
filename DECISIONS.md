@@ -68,3 +68,30 @@ defended or reversed on purpose.
   because a split mid-sentence would truncate quoted evidence.
 - **Roman-numeral and bare-integer lines are dropped as folios during cleaning**,
   matching the extraction rule.
+
+## Library and indexing
+
+- **`meta.json` carries more than the five fields the spec names.** Alongside
+  author, title, filename, added date, and page count it stores `source_id`,
+  `chunk_count`, `chunk_size`, `overlap`, and the list of embedded `tiers`.
+  `list` needs the counts, search needs to know which tiers exist, and recording
+  the chunking parameters means a stored index can be interpreted later without
+  guessing what settings produced it.
+- **Re-adding a file at a *new* tier reuses the stored chunks and embeds only
+  the missing vectors.** The spec says an identical hash is skipped silently; it
+  is read here as skipping redundant *work*, not as refusing to upgrade quality.
+  Re-adding at a tier that is already present remains a true no-op.
+- **Embeddings are L2-normalised at write time**, so cosine similarity at query
+  time is a plain dot product and needs no per-query renormalisation.
+- **`sentence_transformers` is imported lazily inside `load_model`.** It pulls in
+  torch, which costs seconds of startup. `dsearch --help`, `list`, and `remove`
+  must not pay that.
+- **`library.json` and `meta.json` are written to a temp file and renamed.** An
+  add interrupted with Ctrl-C leaves the previous library intact rather than a
+  half-written file. A corrupt `library.json` is treated as empty rather than
+  crashing every command.
+- **`remove` accepts an id prefix, a filename, a filename stem, or a title**, and
+  raises on an ambiguous match instead of guessing — it is about to delete
+  something.
+- **The >10 source warning is attached to the `AddResult`**, not printed from the
+  library layer, so the CLI and the Streamlit app each render it their own way.
