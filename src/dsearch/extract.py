@@ -30,9 +30,48 @@ HEADING_SIZE_RATIO = 1.25
 # Headings are short. Longer lines are body text that merely happens to be large.
 MAX_HEADING_CHARS = 90
 
+# Ligatures that arrive as a single glyph and must be expanded back into
+# letters, or quoted evidence reads "the  ne" instead of "the fine".
+#
+# The U+FBxx entries are the real Unicode ligature block and are always correct.
+# The U+F0DE/U+F0DF entries are private-use codepoints: they carry no Unicode
+# meaning, and their values here were read off the sample typesetting, where
+# replacing them yields "five", "office", "influence", "rifles" and so on across
+# all 400+ occurrences. Another publisher's font may use these slots
+# differently, so only these two observed slots are mapped; any other
+# private-use character is left visible rather than silently guessed at.
+LIGATURES = {
+    "\ufb00": "ff",
+    "\ufb01": "fi",
+    "\ufb02": "fl",
+    "\ufb03": "ffi",
+    "\ufb04": "ffl",
+    "\ufb05": "ft",
+    "\ufb06": "st",
+    "\uf0de": "fi",
+    "\uf0df": "fl",
+}
+
+# A ligature glyph is extracted as its own run, so a spurious space follows it
+# ("of" + fi + " ce"). The space is dropped only when a letter follows, which is
+# the case that would otherwise split a word in two.
+_LIGATURE_RE = re.compile(
+    "(" + "|".join(re.escape(glyph) for glyph in LIGATURES) + r")(\s(?=[A-Za-z]))?"
+)
+
 # Roman numerals used for front matter folios (i, ii, ... xlviii).
 _ROMAN_RE = re.compile(r"^[ivxlcdm]+$", re.IGNORECASE)
 _BARE_INT_RE = re.compile(r"^\d{1,4}$")
+
+
+def normalize_ligatures(text: str) -> str:
+    """Expand ligature glyphs back into the letters they stand for.
+
+    Without this, a passage the PDF renders as "five army checkpoints" is
+    retrieved and quoted as "  ve army checkpoints" — the tool would be showing
+    the reader something the source does not say.
+    """
+    return _LIGATURE_RE.sub(lambda m: LIGATURES[m.group(1)], text)
 
 
 class NoTextLayerError(Exception):
@@ -127,7 +166,7 @@ def _heading_on_page(page: pymupdf.Page, body_size: float) -> str | None:
     for block in page.get_text("dict").get("blocks", []):
         for line in block.get("lines", []):
             spans = line.get("spans", [])
-            text = "".join(span.get("text", "") for span in spans).strip()
+            text = normalize_ligatures("".join(span.get("text", "") for span in spans)).strip()
             if not text or len(text) > MAX_HEADING_CHARS:
                 continue
             if _parse_printed_page(text) is not None:
@@ -184,7 +223,7 @@ def extract(pdf_path: str | Path) -> list[Page]:
         if page_count == 0:
             raise NoTextLayerError(f"{path.name} has no pages.")
 
-        texts = [page.get_text("text") for page in doc]
+        texts = [normalize_ligatures(page.get_text("text")) for page in doc]
         empty = sum(1 for text in texts if len(text.strip()) < MIN_CHARS_FOR_TEXT_LAYER)
         if empty / page_count > SCANNED_PAGE_RATIO:
             raise NoTextLayerError(

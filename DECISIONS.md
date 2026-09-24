@@ -31,6 +31,20 @@ defended or reversed on purpose.
 - **A page needs 20 characters to count as having a text layer.** Scanned pages
   are seldom exactly empty — running heads and artifacts leak a few characters
   through. The scan threshold itself (>80% of pages) is from the spec.
+- **Ligature glyphs are expanded during extraction.** The sample PDFs encode
+  "fi" and "fl" as private-use codepoints (U+F0DE, U+F0DF), so without this the
+  tool retrieves and quotes "I will pay the  ne" where the page plainly reads
+  "I will pay the fine" — it would be showing the reader something the source
+  does not say. The extractor also emits a spurious space after the glyph
+  ("of" + fi + " ce"), which is dropped when a letter follows.
+  The U+FBxx Unicode ligature block is always safe to expand. The two
+  private-use slots carry no Unicode meaning and were read off this typesetting,
+  where they reconstruct "five", "office", "influence" and "rifles" across all
+  400+ occurrences; another publisher's font could use those slots differently,
+  so no other private-use character is guessed at — unmapped ones are left
+  visible so the problem is seen rather than silently papered over.
+  This lives in extraction, not chunking, because it is *decoding* the page
+  correctly rather than editing it.
 - **Chapter titles: PDF outline first, font size second.** The outline is
   authoritative when present. The font heuristic calls a line a heading when it
   is >= 1.25x the modal span size, is <= 90 characters, and is not itself a page

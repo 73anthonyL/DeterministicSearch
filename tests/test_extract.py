@@ -11,6 +11,7 @@ from dsearch.extract import (
     _parse_printed_page,
     _printed_page_for,
     extract,
+    normalize_ligatures,
 )
 
 # A page of prose long enough to clear the text-layer threshold, so these
@@ -193,3 +194,62 @@ class TestHeaderFooterBand:
         # With only three lines there is no header/footer band, so a bare
         # integer in the middle stays body text.
         assert _printed_page_for("Body text.\n47\nMore body.") is None
+
+
+class TestLigatures:
+    """Ligature glyphs must become letters, or quoted evidence is corrupted."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("ﬁve", "five"),
+            ("inﬂuence", "influence"),
+            ("oﬀer", "offer"),
+            ("oﬃce", "office"),
+            ("baﬄe", "baffle"),
+        ],
+    )
+    def test_expands_the_unicode_ligature_block(self, raw, expected):
+        assert normalize_ligatures(raw) == expected
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            # The glyph is extracted as its own run, leaving a spurious space.
+            ("through  ve army checkpoints", "through five army checkpoints"),
+            ("of ce", "office"),
+            ("in uence", "influence"),
+            ("ri es over their shoulders", "rifles over their shoulders"),
+            ("I will pay the  ne", "I will pay the fine"),
+        ],
+    )
+    def test_expands_the_private_use_ligatures_and_their_spurious_space(self, raw, expected):
+        assert normalize_ligatures(raw) == expected
+
+    def test_keeps_a_space_that_precedes_a_non_letter(self):
+        # Only a space that would otherwise split a word is removed.
+        assert normalize_ligatures("the moti . Next") == "the motifi . Next"
+
+    def test_leaves_ordinary_text_untouched(self):
+        text = "The workers rose before dawn and walked to the field."
+        assert normalize_ligatures(text) == text
+
+    def test_leaves_an_unmapped_private_use_character_visible(self):
+        # Guessing at an unknown glyph would silently invent text.
+        assert "" in normalize_ligatures("unknown  glyph")
+
+    def test_extract_normalises_every_page(self, pdf_factory, monkeypatch):
+        # A ligature glyph cannot be round-tripped through a base-14 PDF font,
+        # so this asserts the wiring rather than the glyph: every page's text
+        # must pass through normalisation on its way out of extract().
+        seen: list[str] = []
+
+        def spy(text: str) -> str:
+            seen.append(text)
+            return text.replace("CANARY", "normalised")
+
+        monkeypatch.setattr("dsearch.extract.normalize_ligatures", spy)
+        path = pdf_factory(pages=[f"CANARY {BODY}", f"CANARY {BODY}"])
+        pages = extract(path)
+        assert len(seen) >= 2
+        assert all("normalised" in page.text for page in pages)
