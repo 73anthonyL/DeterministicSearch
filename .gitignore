@@ -1,0 +1,19 @@
+# Source material and generated indexes — never commit
+*.pdf
+samples/
+.dsearch/
+.claude/
+CLAUDE.md
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
