@@ -145,3 +145,30 @@ defended or reversed on purpose.
   `PDF p. 59`, explicitly labelled so it is not mistaken for a printed page.
 - **Three or more authors collapse to "et al."**, per MLA 9; two are joined with
   "and" and only the first is inverted.
+
+## CLI
+
+- **Errors exit 1 with a one-line message, never a traceback.** A missing file,
+  a scanned PDF, an unknown tier, or an ambiguous source name are all ordinary
+  user mistakes and are reported as such, on stderr.
+- **Neighbouring-chunk context is truncated to 180 characters.** The full
+  neighbour is available on the `Result`; at `--k 20` printing all of it buries
+  the matches. The chunk's own sentences are never truncated — that is the
+  evidence.
+- **Progress is reported in pages, with an "reading pages…" state** before the
+  page count is known (extraction finishes after the bar is already drawn).
+- **`--version` is a top-level eager option.** Not in the spec, but it is the
+  first thing anyone cloning the repo checks.
+- **The in-text parenthetical is shown beside the full MLA line** in each panel
+  footer, since that is the form that goes into the essay body.
+
+## Testing
+
+- **Test PDFs are generated, never real books**, per the spec. `insert_text`
+  does not wrap, and anything past the right margin is silently clipped out of
+  the text layer, so fixture prose is hand-wrapped at 88 columns. Without this
+  every fixture page lost its tail and the fixtures quietly misrepresented what
+  a real page looks like.
+- **Embeddings are stubbed with a deterministic bag-of-words vector** in the
+  index, search, and CLI tests, so the suite runs offline in seconds and ranking
+  assertions are stable. The real models are exercised in the end-to-end run.

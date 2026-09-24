@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 
 import pymupdf
@@ -9,6 +10,11 @@ import pytest
 
 BODY_SIZE = 11.0
 HEADING_SIZE = 20.0
+
+# `insert_text` does not wrap: anything past the right margin is clipped and
+# never makes it into the extracted text layer. Fixture prose is wrapped by hand
+# so test pages behave like real typeset pages instead of losing their tails.
+WRAP_COLUMNS = 88
 
 
 def make_pdf(
@@ -35,8 +41,9 @@ def make_pdf(
             page.insert_text((72, cursor), heading, fontsize=HEADING_SIZE)
             cursor += HEADING_SIZE * 2
         for line in body.splitlines() or [""]:
-            page.insert_text((72, cursor), line, fontsize=BODY_SIZE)
-            cursor += BODY_SIZE * 1.5
+            for wrapped in textwrap.wrap(line, WRAP_COLUMNS) or [""]:
+                page.insert_text((72, cursor), wrapped, fontsize=BODY_SIZE)
+                cursor += BODY_SIZE * 1.5
         folio = (folios or [None] * len(pages))[index]
         if folio is not None:
             page.insert_text((72, 720), folio, fontsize=BODY_SIZE)
