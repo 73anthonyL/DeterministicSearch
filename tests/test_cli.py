@@ -195,3 +195,18 @@ class TestSearch:
         # Nothing in a result may be text the tool wrote itself.
         result = runner.invoke(app, ["search", "foreman field", "--k", "1"])
         assert "foreman watched" in result.output.replace("\n", " ")
+
+
+class TestStaleIndex:
+    def test_search_rebuilds_an_old_index_and_says_why(self, added):
+        meta = index.list_sources()[0]
+        stored = meta.to_dict()
+        del stored["index_version"]
+        index._write_json(index.source_dir(meta.source_id) / "meta.json", stored)
+        index.save_library([index.SourceMeta.from_dict(stored)])
+
+        result = runner.invoke(app, ["search", "knee pain clinic"])
+        assert result.exit_code == 0, result.output
+        assert "re-extracted" in result.output
+        assert index.list_sources()[0].index_version == index.INDEX_VERSION
+        assert "Holmes, Seth." in result.output  # And the search still ran.

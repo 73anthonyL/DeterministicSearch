@@ -313,3 +313,85 @@ class TestLoaders:
         meta = index.add(book).meta
         with pytest.raises(ValueError, match="Unknown tier"):
             index.load_vectors(meta.source_id, "turbo")
+
+
+class TestIndexVersion:
+    """A library built by an older pipeline is rebuilt once, automatically."""
+
+    def _age(self, meta):
+        """Rewrite a source's stored metadata as if an older release wrote it."""
+        stored = meta.to_dict()
+        del stored["index_version"]
+        index._write_json(index.source_dir(meta.source_id) / "meta.json", stored)
+        index.save_library([index.SourceMeta.from_dict(stored)])
+
+    def test_new_sources_carry_the_current_version_and_path(self, book):
+        meta = index.add(book).meta
+        assert meta.index_version == index.INDEX_VERSION
+        assert meta.path == str(book.resolve())
+
+    def test_missing_version_reads_as_stale(self, book):
+        meta = index.add(book).meta
+        self._age(meta)
+        assert index.is_stale(index.list_sources()[0])
+
+    def test_add_rebuilds_a_stale_source_and_says_why(self, book, stub_embeddings):
+        meta = index.add(book).meta
+        self._age(meta)
+        texts_before = stub_embeddings["texts"]
+        lines: list[str] = []
+
+        result = index.add(book, notify=lines.append)
+
+        assert result.reindexed is True
+        assert result.already_indexed is False
+        assert result.meta.index_version == index.INDEX_VERSION
+        assert stub_embeddings["texts"] > texts_before
+        assert len(lines) == 1 and "re-extracted" in lines[0]
+        assert index.list_sources()[0].index_version == index.INDEX_VERSION
+
+    def test_rebuild_re_embeds_every_tier_the_source_had(self, book):
+        meta = index.add(book, tier="fast").meta
+        index.add(book, tier="balanced")
+        self._age(index.list_sources()[0])
+
+        result = index.add(book, tier="fast")
+        assert sorted(result.meta.tiers) == ["balanced", "fast"]
+        assert index.vectors_path(meta.source_id, "balanced").is_file()
+        assert index.load_vectors(meta.source_id, "balanced").shape[0] == result.meta.chunk_count
+
+    def test_rebuild_keeps_edited_author_and_title(self, book):
+        meta = index.add(book, author="Seth Holmes", title="Fresh Fruit").meta
+        self._age(meta)
+        result = index.add(book)
+        assert (result.meta.author, result.meta.title) == ("Seth Holmes", "Fresh Fruit")
+
+    def test_upgrade_stale_rebuilds_from_the_stored_path(self, book, stub_embeddings):
+        meta = index.add(book).meta
+        self._age(meta)
+        texts_before = stub_embeddings["texts"]
+        lines: list[str] = []
+        refreshed = index.upgrade_stale(index.list_sources(), notify=lines.append)
+        assert refreshed[0].index_version == index.INDEX_VERSION
+        assert stub_embeddings["texts"] > texts_before
+        assert len(lines) == 1
+
+    def test_upgrade_stale_reports_a_missing_pdf_and_keeps_searching(self, book, stub_embeddings):
+        meta = index.add(book).meta
+        self._age(meta)
+        book.unlink()
+        texts_before = stub_embeddings["texts"]
+        lines: list[str] = []
+        refreshed = index.upgrade_stale(index.list_sources(), notify=lines.append)
+        assert refreshed[0].source_id == meta.source_id
+        assert index.is_stale(refreshed[0])
+        assert stub_embeddings["texts"] == texts_before
+        assert lines and "dsearch add" in lines[-1]
+
+    def test_upgrade_stale_leaves_current_sources_alone(self, book, stub_embeddings):
+        index.add(book)
+        texts_before = stub_embeddings["texts"]
+        lines: list[str] = []
+        index.upgrade_stale(index.list_sources(), notify=lines.append)
+        assert stub_embeddings["texts"] == texts_before
+        assert lines == []

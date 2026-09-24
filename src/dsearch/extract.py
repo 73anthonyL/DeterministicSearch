@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
 import pymupdf
+
+logger = logging.getLogger(__name__)
+
+# Bit set in a span's `flags` when MuPDF judged it a superscript — an endnote
+# marker, in a book. Dropping the span keeps "competency.35" from reaching the
+# quoted evidence as if it were part of the sentence.
+SUPERSCRIPT_FLAG = 1
+
+# Fewer letter-spaced tokens than this could be a real word ("A I" in a title);
+# "F I V E" and longer are typographic spacing and are collapsed.
+MIN_LETTER_SPACED_RUN = 3
 
 # A page counts as "empty" below this many characters of extracted text. Running
 # heads and stray artifacts mean a scanned page is rarely exactly zero-length.
@@ -63,6 +75,19 @@ _LIGATURE_RE = re.compile(
 _ROMAN_RE = re.compile(r"^[ivxlcdm]+$", re.IGNORECASE)
 _BARE_INT_RE = re.compile(r"^\d{1,4}$")
 
+# An endnote marker that survived the superscript check: one to three digits
+# glued to the end of a word or its closing punctuation, then whitespace or the
+# end of the line. The letter before it must be lowercase so that codes such as
+# "B12", "F16" and "COVID19" are left alone; a real number in prose ("in 1984
+# the") is always preceded by a space and so never matches.
+_ENDNOTE_MARKER_RE = re.compile(r"([a-z][.,;:!?)\]\"'”’]{0,2})(\d{1,3})(?=\s|$)")
+
+# Three or more single characters separated by single spaces: a letter-spaced
+# chapter number such as "F I V E".
+_LETTER_SPACED_RE = re.compile(
+    r"(?<!\S)(\w(?: \w){" + str(MIN_LETTER_SPACED_RUN - 1) + r",})(?!\S)"
+)
+
 
 def normalize_ligatures(text: str) -> str:
     """Expand ligature glyphs back into the letters they stand for.
@@ -72,6 +97,58 @@ def normalize_ligatures(text: str) -> str:
     the reader something the source does not say.
     """
     return _LIGATURE_RE.sub(lambda m: LIGATURES[m.group(1)], text)
+
+
+def strip_endnote_markers(text: str) -> tuple[str, int]:
+    """Remove endnote digits attached to a word ("competency.35 In" -> "competency. In").
+
+    This is the fallback for markers the PDF did not flag as superscript. It is
+    deliberately narrow (see `_ENDNOTE_MARKER_RE`) and the count is returned so
+    the caller can log it — a nonzero count on a page with no notes is the
+    signal that a real number was eaten.
+    """
+    return _ENDNOTE_MARKER_RE.subn(r"\1", text)
+
+
+def normalize_title(title: str) -> str:
+    """Tidy a chapter title for storage: "F I V E  “Doctors”" -> "FIVE “Doctors”".
+
+    Publishers letter-space chapter numbers for effect; the spaces are
+    typography, not text, and would otherwise show in every result header.
+    """
+    collapsed = _LETTER_SPACED_RE.sub(lambda m: m.group(1).replace(" ", ""), title)
+    return re.sub(r"\s+", " ", collapsed).strip()
+
+
+def _page_text(page: pymupdf.Page) -> str:
+    """Page text rebuilt from spans, with superscript spans dropped.
+
+    Block and line boundaries are preserved exactly as `get_text("text")` lays
+    them out, so folio and running-head detection downstream see the same
+    lines. A page with no span data at all (some generators emit only raw text)
+    falls back to the plain text layer.
+    """
+    blocks: list[str] = []
+    for block in page.get_text("dict").get("blocks", []):
+        lines = []
+        for line in block.get("lines", []):
+            spans = line.get("spans", [])
+            kept = [s.get("text", "") for s in spans if not s.get("flags", 0) & SUPERSCRIPT_FLAG]
+            if spans:
+                lines.append("".join(kept))
+        if lines:
+            blocks.append("\n".join(lines))
+    if not blocks:
+        return page.get_text("text")
+    return "\n".join(blocks) + "\n"
+
+
+def _clean_page_text(page: pymupdf.Page) -> str:
+    """Extract one page's text with ligatures expanded and endnote markers removed."""
+    text, stripped = strip_endnote_markers(normalize_ligatures(_page_text(page)))
+    if stripped:
+        logger.debug("page %d: stripped %d endnote marker(s)", page.number + 1, stripped)
+    return text
 
 
 class NoTextLayerError(Exception):
@@ -172,7 +249,7 @@ def _heading_on_page(page: pymupdf.Page, body_size: float) -> str | None:
             if _parse_printed_page(text) is not None:
                 continue  # A large page number is not a heading.
             if max((span["size"] for span in spans), default=0.0) >= threshold:
-                return text
+                return normalize_title(text)
     return None
 
 
@@ -190,7 +267,7 @@ def _chapters_from_toc(doc: pymupdf.Document) -> dict[int, str]:
         level, title, page_no = entry[0], entry[1], entry[2]
         if level != 1 or page_no < 1:
             continue
-        title = title.strip()
+        title = normalize_title(title)
         if title:
             starts.setdefault(page_no, title)
     return starts
@@ -223,7 +300,7 @@ def extract(pdf_path: str | Path) -> list[Page]:
         if page_count == 0:
             raise NoTextLayerError(f"{path.name} has no pages.")
 
-        texts = [normalize_ligatures(page.get_text("text")) for page in doc]
+        texts = [_clean_page_text(page) for page in doc]
         empty = sum(1 for text in texts if len(text.strip()) < MIN_CHARS_FOR_TEXT_LAYER)
         if empty / page_count > SCANNED_PAGE_RATIO:
             raise NoTextLayerError(

@@ -12,6 +12,8 @@ from dsearch.extract import (
     _printed_page_for,
     extract,
     normalize_ligatures,
+    normalize_title,
+    strip_endnote_markers,
 )
 
 # A page of prose long enough to clear the text-layer threshold, so these
@@ -253,3 +255,85 @@ class TestLigatures:
         pages = extract(path)
         assert len(seen) >= 2
         assert all("normalised" in page.text for page in pages)
+
+
+class TestEndnoteMarkers:
+    """Endnote digits must not reach the quoted evidence."""
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("word.35 Next", "word. Next"),
+            ("populations.16", "populations."),
+            ("Mexico,2 each of us", "Mexico, each of us"),
+            ("competency.35\nIn many ways", "competency.\nIn many ways"),
+            ("anything.”12 The", "anything.” The"),
+        ],
+    )
+    def test_strips_digits_glued_to_a_word(self, raw, expected):
+        text, count = strip_endnote_markers(raw)
+        assert text == expected
+        assert count == 1
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "in 1984 the Migrant Clinicians Network",
+            "earned $7.16 an hour",
+            "vitamin B12 and F16 jets",  # Uppercase before the digits: a code, not a note.
+            "the 1990s were",  # Digits followed by a letter, not whitespace.
+            "Route 66",
+        ],
+    )
+    def test_leaves_real_numbers_alone(self, raw):
+        assert strip_endnote_markers(raw) == (raw, 0)
+
+    def test_superscript_span_is_dropped_from_a_generated_pdf(self, tmp_path):
+        # A raised, smaller run of digits is what a typeset endnote marker is;
+        # pymupdf flags it as superscript, and extract() must skip the span.
+        doc = pymupdf.open()
+        page = doc.new_page()
+        page.insert_text((36, 80), BODY[:80], fontsize=11)  # Clears the text-layer threshold.
+        lead = "The clinic adopted training in cultural competency,"
+        width = pymupdf.get_text_length(lead, fontsize=11)
+        page.insert_text((36, 100), lead, fontsize=11)
+        page.insert_text((36 + width, 96), "35", fontsize=6)
+        page.insert_text((36 + width + 8, 100), " which broadened the gaze.", fontsize=11)
+        path = tmp_path / "notes.pdf"
+        doc.save(path)
+        doc.close()
+
+        text = extract(path)[0].text
+        assert "competency, which broadened the gaze." in text
+        assert "35" not in text
+
+    def test_page_without_superscripts_is_unchanged(self, pdf_factory):
+        path = pdf_factory(pages=[f"Plain prose. {BODY}"])
+        assert "Plain prose." in extract(path)[0].text
+
+
+class TestNormalizeTitle:
+    def test_collapses_letter_spaced_chapter_number(self):
+        assert normalize_title("F I V E “Doctors Don’t Know Anything”") == (
+            "FIVE “Doctors Don’t Know Anything”"
+        )
+
+    def test_collapses_repeated_whitespace_and_trims(self):
+        assert normalize_title("  T H R E E   Segregation  on the Farm ") == (
+            "THREE Segregation on the Farm"
+        )
+
+    def test_leaves_short_single_letter_words(self):
+        # "A" and "I" are real words; only runs of three or more collapse.
+        assert normalize_title("A Day I Remember") == "A Day I Remember"
+
+    def test_leaves_an_ordinary_title(self):
+        assert normalize_title("Chapter 1: The Body") == "Chapter 1: The Body"
+
+    def test_heading_detected_from_font_size_is_normalised(self, pdf_factory):
+        path = pdf_factory(pages=[f"Body. {BODY}"], headings={1: "T H R E E Segregation"})
+        assert extract(path)[0].chapter == "THREE Segregation"
+
+    def test_outline_title_is_normalised(self, pdf_factory):
+        path = pdf_factory(pages=[f"Body. {BODY}"], toc=[(1, "O N E  The Road", 1)])
+        assert extract(path)[0].chapter == "ONE The Road"

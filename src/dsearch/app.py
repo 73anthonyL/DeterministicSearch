@@ -19,12 +19,15 @@ from dsearch.cite import citation_block, mla
 from dsearch.extract import NoTextLayerError
 from dsearch.index import (
     DEFAULT_TIER,
+    INDEX_VERSION,
     TIERS,
     AmbiguousSourceError,
     SourceNotFoundError,
     add,
     list_sources,
     remove,
+    resolve_source,
+    upgrade_stale,
 )
 from dsearch.search import DEFAULT_K, Result, search
 
@@ -116,6 +119,7 @@ def _index_upload(upload, author: str, title: str, tier: str, size: int, overlap
             chunk_size=size,
             overlap=overlap,
             progress=tick,
+            notify=st.info,
         )
     except NoTextLayerError as exc:
         bar.empty()
@@ -140,6 +144,20 @@ def _index_upload(upload, author: str, title: str, tier: str, size: int, overlap
         )
     if result.warning:
         st.warning(result.warning)
+
+
+def _upgrade_stale_sources(source: str | None) -> None:
+    """Rebuild any in-scope source indexed by an older pipeline, with a page bar."""
+    scoped = [resolve_source(source)] if source else list_sources()
+    if not any(meta.index_version < INDEX_VERSION for meta in scoped):
+        return
+    bar = st.progress(0.0, text="Re-indexing…")
+
+    def tick(done: int, total: int) -> None:
+        bar.progress(min(done / max(total, 1), 1.0), text=f"Re-indexing page {done} of {total}")
+
+    upgrade_stale(scoped, progress=tick, notify=st.info)
+    bar.empty()
 
 
 def _sidebar() -> tuple[str, str | None]:
@@ -232,12 +250,13 @@ def main() -> None:
             st.info("Add a PDF in the sidebar to get started.")
         return
 
-    with st.spinner("Searching…"):
-        try:
+    try:
+        _upgrade_stale_sources(source)
+        with st.spinner("Searching…"):
             results = search(query, k=k, tier=tier, source=source)
-        except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
-            st.error(str(exc))
-            return
+    except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+        st.error(str(exc))
+        return
 
     if not results:
         st.warning(

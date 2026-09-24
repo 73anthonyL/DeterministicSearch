@@ -36,6 +36,13 @@ TIERS: dict[str, str] = {
 }
 DEFAULT_TIER = "fast"
 
+# Bumped whenever extraction or chunking changes what ends up in chunks.jsonl,
+# so that a library built by an older release is rebuilt rather than searched
+# with stale text. History:
+#   1  original release
+#   2  superscript endnote markers dropped; chapter titles de-letter-spaced
+INDEX_VERSION = 2
+
 # Past this many sources, searches slow down noticeably. A warning, never a block.
 SOURCE_WARN_LIMIT = 10
 
@@ -48,6 +55,10 @@ HASH_BLOCK = 1 << 20
 
 # Progress callbacks receive (pages_done, pages_total).
 ProgressFn = Callable[[int, int], None]
+
+# Notify callbacks receive one human-readable line, printed before a long job
+# so the user knows why they are waiting.
+NotifyFn = Callable[[str], None]
 
 _MODEL_CACHE: dict[str, object] = {}
 
@@ -74,6 +85,12 @@ class SourceMeta:
     chunk_size: int = DEFAULT_SIZE
     overlap: int = DEFAULT_OVERLAP
     tiers: list[str] = field(default_factory=list)
+    # Sources written before versioning existed carry no field and read as 0,
+    # which is older than every real version, so they are rebuilt once.
+    index_version: int = 0
+    # Where the PDF was when it was added, so a stale index can be rebuilt
+    # without asking. None for an upload whose temp file is gone.
+    path: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -97,6 +114,7 @@ class AddResult:
     already_indexed: bool
     embedded_tier: str | None
     warning: str | None = None
+    reindexed: bool = False
 
 
 def home() -> Path:
@@ -157,6 +175,27 @@ def load_library() -> list[SourceMeta]:
 
 def save_library(sources: Iterable[SourceMeta]) -> None:
     _write_json(library_path(), [s.to_dict() for s in sources])
+
+
+def save_meta(meta: SourceMeta) -> None:
+    """Persist one source's metadata to its folder and to the library listing."""
+    _write_json(source_dir(meta.source_id) / "meta.json", meta.to_dict())
+    others = [s for s in load_library() if s.source_id != meta.source_id]
+    save_library([*others, meta])
+
+
+def is_stale(meta: SourceMeta) -> bool:
+    """True if this source was indexed by an older extraction pipeline."""
+    return meta.index_version < INDEX_VERSION
+
+
+def stale_reason(meta: SourceMeta) -> str:
+    """The one line shown before a stale source is rebuilt."""
+    return (
+        f"{meta.title or meta.filename} was indexed with format v{meta.index_version}; "
+        f"v{INDEX_VERSION} strips endnote markers and cleans chapter titles, so it is "
+        "being re-extracted and re-embedded."
+    )
 
 
 def list_sources() -> list[SourceMeta]:
@@ -301,6 +340,120 @@ def _meta_from_pdf(
         author=(author or pdf_author.strip() or ""),
         added=date.today().isoformat(),
         page_count=page_count,
+        index_version=INDEX_VERSION,
+        path=str(path.resolve()),
+    )
+
+
+def _extract_and_chunk(path: Path, meta: SourceMeta) -> list[Chunk]:
+    """Run the text pipeline for `meta` from `path`, store the chunks, update counts."""
+    pages = extract(path)
+    chunks = chunk(pages, size=meta.chunk_size, overlap=meta.overlap, source_id=meta.source_id)
+    save_chunks(meta.source_id, chunks)
+    meta.page_count = len(pages)
+    meta.chunk_count = len(chunks)
+    meta.index_version = INDEX_VERSION
+    meta.path = str(path.resolve())
+    return chunks
+
+
+def embed_source(
+    meta: SourceMeta,
+    tier: str,
+    *,
+    chunks: list[Chunk] | None = None,
+    progress: ProgressFn | None = None,
+) -> SourceMeta:
+    """Embed a source's stored chunks at `tier`, save the vectors, and persist meta.
+
+    Only `vectors_<tier>.npy` is touched: chunks are tier-independent and other
+    tiers' vectors stay where they are.
+    """
+    _validate_tier(tier)
+    if chunks is None:
+        chunks = load_chunks(meta.source_id)
+    vectors = embed_texts(
+        [c.text for c in chunks],
+        tier,
+        pages=[c.pdf_page for c in chunks],
+        page_count=meta.page_count,
+        progress=progress,
+    )
+    vectors_path(meta.source_id, tier).parent.mkdir(parents=True, exist_ok=True)
+    np.save(vectors_path(meta.source_id, tier), vectors)
+    if tier not in meta.tiers:
+        meta.tiers.append(tier)
+    save_meta(meta)
+    return meta
+
+
+def reindex(
+    meta: SourceMeta,
+    *,
+    path: str | Path | None = None,
+    tier: str | None = None,
+    progress: ProgressFn | None = None,
+) -> SourceMeta:
+    """Rebuild a source from its PDF: re-extract, re-chunk, re-embed every tier it had.
+
+    Old vectors are deleted first because they index the old chunks; a tier
+    that was present is embedded again so the user keeps what they had. Author
+    and title are preserved — they may have been set by `edit`.
+
+    Raises FileNotFoundError if the PDF is no longer where it was added from.
+    """
+    source = Path(path or meta.path or "")
+    if not source.is_file():
+        raise FileNotFoundError(
+            f"{meta.title or meta.filename} was indexed by an older version and its PDF "
+            f"is no longer at {meta.path or 'a known path'}. Run `dsearch add <pdf>` on it again."
+        )
+    tiers = sorted({*meta.tiers, *([tier] if tier else [])})
+    for old in source_dir(meta.source_id).glob("vectors_*.npy"):
+        old.unlink()
+    meta.tiers = []
+    chunks = _extract_and_chunk(source, meta)
+    for each in tiers:
+        embed_source(meta, each, chunks=chunks, progress=progress)
+    save_meta(meta)
+    return meta
+
+
+def upgrade_stale(
+    sources: list[SourceMeta],
+    *,
+    progress: ProgressFn | None = None,
+    notify: NotifyFn | None = None,
+) -> list[SourceMeta]:
+    """Rebuild any of `sources` indexed by an older pipeline, if its PDF is reachable.
+
+    Returns the sources with rebuilt entries swapped in. A stale source whose
+    PDF has moved is reported through `notify` and searched as-is — one lost
+    file must not block the library.
+    """
+    refreshed = []
+    for meta in sources:
+        if not is_stale(meta):
+            refreshed.append(meta)
+            continue
+        try:
+            if notify:
+                notify(stale_reason(meta))
+            refreshed.append(reindex(meta, progress=progress))
+        except FileNotFoundError as exc:
+            if notify:
+                notify(str(exc))
+            refreshed.append(meta)
+    return refreshed
+
+
+def _library_warning(count: int) -> str | None:
+    if count <= SOURCE_WARN_LIMIT:
+        return None
+    return (
+        f"The library now holds {count} sources (past the "
+        f"{SOURCE_WARN_LIMIT} that searches stay fast at). "
+        "Consider `dsearch remove` for texts you are done with."
     )
 
 
@@ -313,12 +466,14 @@ def add(
     chunk_size: int = DEFAULT_SIZE,
     overlap: int = DEFAULT_OVERLAP,
     progress: ProgressFn | None = None,
+    notify: NotifyFn | None = None,
 ) -> AddResult:
     """Index a PDF into the library.
 
     Re-adding a file whose bytes are already indexed at this tier does no work
     and reports that. Re-adding it at a *new* tier keeps the stored chunks and
     embeds only the missing vectors, so switching quality never re-extracts.
+    A source indexed by an older pipeline is rebuilt, and `notify` is told why.
 
     Raises NoTextLayerError for scans and FileNotFoundError for a bad path.
     """
@@ -328,54 +483,33 @@ def add(
         raise FileNotFoundError(f"No such PDF: {path}")
 
     source_id = file_hash(path)
-    library = load_library()
-    existing = next((s for s in library if s.source_id == source_id), None)
+    existing = next((s for s in load_library() if s.source_id == source_id), None)
+    has_chunks = (source_dir(source_id) / "chunks.jsonl").is_file()
+    reindexed = False
 
-    if existing and tier in existing.tiers and vectors_path(source_id, tier).is_file():
+    if existing and has_chunks and is_stale(existing):
+        if notify:
+            notify(stale_reason(existing))
+        meta = reindex(existing, path=path, tier=tier, progress=progress)
+        reindexed = True
+    elif existing and tier in existing.tiers and vectors_path(source_id, tier).is_file():
         return AddResult(meta=existing, already_indexed=True, embedded_tier=None)
-
-    if existing and (source_dir(source_id) / "chunks.jsonl").is_file():
+    elif existing and has_chunks:
         # Known file, new tier: reuse the chunks and embed only what is missing.
-        meta = existing
-        chunks = load_chunks(source_id)
+        meta = embed_source(existing, tier, progress=progress)
     else:
-        pages = extract(path)
-        chunks = chunk(pages, size=chunk_size, overlap=overlap, source_id=source_id)
-        meta = _meta_from_pdf(path, source_id, author, title, page_count=len(pages))
-        meta.chunk_count = len(chunks)
+        meta = _meta_from_pdf(path, source_id, author, title, page_count=0)
         meta.chunk_size = chunk_size
         meta.overlap = overlap
-        save_chunks(source_id, chunks)
+        chunks = _extract_and_chunk(path, meta)
+        meta = embed_source(meta, tier, chunks=chunks, progress=progress)
 
-    vectors = embed_texts(
-        [c.text for c in chunks],
-        tier,
-        pages=[c.pdf_page for c in chunks],
-        page_count=meta.page_count,
-        progress=progress,
-    )
-    vectors_path(source_id, tier).parent.mkdir(parents=True, exist_ok=True)
-    np.save(vectors_path(source_id, tier), vectors)
-
-    if tier not in meta.tiers:
-        meta.tiers.append(tier)
-    _write_json(source_dir(source_id) / "meta.json", meta.to_dict())
-
-    library = [s for s in library if s.source_id != source_id] + [meta]
-    save_library(library)
-
-    warning = None
-    if len(library) > SOURCE_WARN_LIMIT:
-        warning = (
-            f"The library now holds {len(library)} sources (past the "
-            f"{SOURCE_WARN_LIMIT} that searches stay fast at). "
-            "Consider `dsearch remove` for texts you are done with."
-        )
     return AddResult(
         meta=meta,
         already_indexed=False,
         embedded_tier=tier,
-        warning=warning,
+        warning=_library_warning(len(load_library())),
+        reindexed=reindexed,
     )
 
 

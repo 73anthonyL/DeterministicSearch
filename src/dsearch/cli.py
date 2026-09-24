@@ -29,6 +29,8 @@ from dsearch.index import (
     AmbiguousSourceError,
     SourceNotFoundError,
     home,
+    resolve_source,
+    upgrade_stale,
 )
 from dsearch.index import (
     add as index_add,
@@ -134,6 +136,35 @@ class _PageColumn(ProgressColumn):
         return Text(f"page {int(task.completed)}/{int(task.total)}", style="dim")
 
 
+def _page_progress() -> Progress:
+    """A transient progress bar that counts pages, shared by every embedding job."""
+    return Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        _PageColumn(),
+        TimeElapsedColumn(),
+        console=console,
+        transient=True,
+    )
+
+
+def _note(message: str) -> None:
+    console.print(f"[yellow]Note[/yellow] {message}")
+
+
+def _upgrade_stale_sources(source: str | None) -> None:
+    """Rebuild any in-scope source indexed by an older pipeline before searching."""
+    scoped = [resolve_source(source)] if source else index_list()
+    with _page_progress() as progress:
+        task = progress.add_task("Re-indexing", total=None)
+
+        def tick(done: int, total: int) -> None:
+            progress.update(task, completed=done, total=total)
+
+        upgrade_stale(scoped, progress=tick, notify=_note)
+
+
 @app.command()
 def add(
     pdf: Annotated[Path, typer.Argument(help="Path to the PDF to index.")],
@@ -146,15 +177,8 @@ def add(
     ] = DEFAULT_OVERLAP,
 ) -> None:
     """Index a PDF into your library."""
-    columns = (
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        _PageColumn(),
-        TimeElapsedColumn(),
-    )
     try:
-        with Progress(*columns, console=console, transient=True) as progress:
+        with _page_progress() as progress:
             task = progress.add_task(f"Embedding [bold]{pdf.name}[/bold]", total=None)
 
             def tick(done: int, total: int) -> None:
@@ -168,6 +192,7 @@ def add(
                 chunk_size=chunk_size,
                 overlap=overlap,
                 progress=tick,
+                notify=_note,
             )
     except FileNotFoundError as exc:
         _fail(str(exc))
@@ -238,6 +263,7 @@ def search(
 ) -> None:
     """Find page-cited passages that answer a query."""
     try:
+        _upgrade_stale_sources(source)
         results = run_search(query, k=k, tier=tier, source=source)
     except (SourceNotFoundError, AmbiguousSourceError) as exc:
         _fail(str(exc))

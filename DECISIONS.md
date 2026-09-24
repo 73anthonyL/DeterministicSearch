@@ -209,3 +209,46 @@ defended or reversed on purpose.
   to a generated temp name. The library records `path.name`, so the alternative
   stored `tmpjzua04hj.pdf` — meaningless in `dsearch list` and unusable as an
   argument to `dsearch remove`.
+
+## Patch round 1
+
+### Extraction artifacts
+
+- **Superscript spans are dropped by MuPDF's own flag, then a regex catches
+  the rest.** The flag is authoritative when present (every endnote marker in
+  the sample chapters carries it); the regex is the belt to its braces for PDFs
+  whose generator did not mark them. The regex requires a *lowercase* letter
+  before the digits so that "B12", "F16" and "COVID19" survive, and requires
+  whitespace or end of line after them so that "the 1990s" does. The one known
+  false positive is a tight "p.35" with no space, which typeset books avoid.
+  Counts are logged at DEBUG per page rather than printed, so an audit is
+  `DSEARCH_LOG=DEBUG`-style opt-in and a clean add stays quiet.
+- **Page text is rebuilt from spans in the same block/line layout as
+  `get_text("text")`.** Verified byte-identical on all 43 pages of the sample
+  chapter when no spans are dropped, so folio and running-head detection see
+  exactly what they saw before.
+- **Letter-spacing collapses only for runs of three or more single characters.**
+  "F I V E" and "T H R E E" are typography; "A" and "I" in a title such as
+  "A Day I Remember" are words, and a two-token run cannot be told apart from
+  one. A single-letter word that directly follows a spaced number ("F I V E A
+  Day") would be swallowed into it — accepted as rare.
+- **Endnote and title cleaning live in `extract`, not `chunk`.** The earlier
+  rule was that `Page.text` is a faithful copy of the PDF. A superscript marker
+  is not part of the sentence on the page any more than the running head is, so
+  removing it is still decoding, not editing — the same argument as ligatures.
+- **`index_version` is an integer, with its history in a comment next to the
+  constant.** A source written before versioning has no field and reads as 0,
+  which is older than every real version, so it is rebuilt exactly once.
+- **The PDF's absolute path is stored in `meta.json` so a stale source can be
+  rebuilt from `search`, where no path is given.** The alternative — copying
+  the PDF into `~/.dsearch` — would double the disk footprint of every book for
+  a rebuild that happens once per format bump. If the file has moved (or was a
+  Streamlit upload, whose temp file is gone), the search says so and runs on
+  the old index rather than failing; `dsearch add` on the file fixes it.
+- **A rebuild re-embeds every tier the source already had, not only the one
+  requested.** Old vectors index old chunks, so leaving them would silently
+  corrupt searches at the other tiers; deleting them would silently take away
+  quality the user had paid for. Re-embedding is the only option that is
+  neither.
+- **Author and title survive a rebuild.** They may have been set by hand and
+  are metadata about the book, not about the text pipeline.
