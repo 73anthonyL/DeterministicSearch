@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import date
@@ -53,6 +54,20 @@ EMBED_BATCH = 32
 
 # Bytes per read when hashing, so a 500MB PDF does not land in memory at once.
 HASH_BLOCK = 1 << 20
+
+# Embedding throughput used for time estimates before any run has been
+# measured on this machine. Deliberately pessimistic (a few-year-old laptop
+# CPU): an estimate that runs long is a pleasant surprise, one that runs short
+# is a broken promise.
+DEFAULT_PAGES_PER_SECOND: dict[str, float] = {
+    "fast": 3.0,
+    "balanced": 0.6,
+    "best": 0.5,
+}
+
+# A measured rate is only recorded from a run at least this long, so a
+# three-page test file does not fix a noisy number for every later estimate.
+MIN_PAGES_FOR_RATE = 5
 
 # Progress callbacks receive (pages_done, pages_total).
 ProgressFn = Callable[[int, int], None]
@@ -137,6 +152,111 @@ def library_path() -> Path:
 
 def vectors_path(source_id: str, tier: str) -> Path:
     return source_dir(source_id) / f"vectors_{tier}.npy"
+
+
+def config_path() -> Path:
+    return home() / "config.json"
+
+
+def load_config() -> dict:
+    """Machine-local settings: currently the measured embedding rate per tier."""
+    path = config_path()
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_config(config: dict) -> None:
+    _write_json(config_path(), config)
+
+
+def embed_rate(tier: str) -> tuple[float, bool]:
+    """Pages per second for `tier`, and whether it was measured on this machine."""
+    measured = load_config().get("pages_per_second", {}).get(tier)
+    if measured:
+        return float(measured), True
+    return DEFAULT_PAGES_PER_SECOND[tier], False
+
+
+def record_embed_rate(tier: str, pages: int, seconds: float) -> None:
+    """Store the throughput of the first substantial embed run for `tier`.
+
+    Only the first run is kept: later runs on the same machine tell the same
+    story, and a rate that drifts between searches would make the estimate
+    look untrustworthy.
+    """
+    if pages < MIN_PAGES_FOR_RATE or seconds <= 0:
+        return
+    config = load_config()
+    rates = config.setdefault("pages_per_second", {})
+    if tier in rates:
+        return
+    rates[tier] = round(pages / seconds, 2)
+    save_config(config)
+
+
+def estimate_seconds(pages: int, tier: str) -> float:
+    rate, _ = embed_rate(tier)
+    return pages / rate
+
+
+def format_duration(seconds: float) -> str:
+    """A rough, honest duration: "about 40 s", "about 3 min", "about 1 h 10 min"."""
+    seconds = max(seconds, 0.0)
+    if seconds < 60:
+        return f"about {max(int(round(seconds)), 1)} s"
+    minutes = int(round(seconds / 60))
+    if minutes < 60:
+        return f"about {minutes} min"
+    hours, minutes = divmod(minutes, 60)
+    return f"about {hours} h {minutes} min" if minutes else f"about {hours} h"
+
+
+def available_tiers(source_id: str) -> list[str]:
+    """Tiers whose vector file actually exists on disk, in tier order."""
+    return [tier for tier in TIERS if vectors_path(source_id, tier).is_file()]
+
+
+@dataclass
+class TierGap:
+    """Which in-scope sources lack a tier, and what filling it would cost."""
+
+    tier: str
+    missing: list[SourceMeta]
+    pages: int
+    seconds: float
+    rate_measured: bool
+    # Tiers every in-scope source already has: the no-wait alternative.
+    alternatives: list[str]
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.missing
+
+
+def tier_gap(tier: str, sources: list[SourceMeta]) -> TierGap:
+    """Work out what `sources` are missing at `tier` and how long embedding takes."""
+    _validate_tier(tier)
+    have = {meta.source_id: set(available_tiers(meta.source_id)) for meta in sources}
+    missing = [meta for meta in sources if tier not in have[meta.source_id]]
+    pages = sum(meta.page_count for meta in missing)
+    rate, measured = embed_rate(tier)
+    alternatives = [
+        other
+        for other in TIERS
+        if other != tier and sources and all(other in have[m.source_id] for m in sources)
+    ]
+    return TierGap(
+        tier=tier,
+        missing=missing,
+        pages=pages,
+        seconds=pages / rate,
+        rate_measured=measured,
+        alternatives=alternatives,
+    )
 
 
 def _validate_tier(tier: str) -> str:
@@ -277,6 +397,7 @@ def embed_texts(
         return np.zeros((0, model.get_sentence_embedding_dimension()), dtype=np.float32)
 
     total_pages = page_count or (max(pages) if pages else 1)
+    started = time.perf_counter()  # After load_model, so a download is not timed.
     out: list[np.ndarray] = []
     for start in range(0, len(texts), EMBED_BATCH):
         batch = texts[start : start + EMBED_BATCH]
@@ -292,6 +413,8 @@ def embed_texts(
             done = pages[min(start + len(batch), len(pages)) - 1] if pages else total_pages
             progress(min(done, total_pages), total_pages)
 
+    if page_count:
+        record_embed_rate(tier, page_count, time.perf_counter() - started)
     return np.vstack(out).astype(np.float32)
 
 

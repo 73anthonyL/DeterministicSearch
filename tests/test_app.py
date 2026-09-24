@@ -209,3 +209,58 @@ class FakeUpload:
 
     def getbuffer(self):
         return b"%PDF-1.4 fake"
+
+
+class TestTierGapBox:
+    def _gap(self, alternatives):
+        from dsearch.index import TierGap
+
+        missing = [
+            SourceMeta("a" * 64, "a.pdf", "Chapter 4", "", "2026-09-24", 23),
+            SourceMeta("b" * 64, "b.pdf", "Chapter 5", "", "2026-09-24", 44),
+        ]
+        return TierGap(
+            tier="balanced",
+            missing=missing,
+            pages=67,
+            seconds=120.0,
+            rate_measured=False,
+            alternatives=alternatives,
+        )
+
+    def test_names_sources_pages_estimate_and_alternative(self):
+        text = app._gap_message(self._gap(["fast"]), total=5)
+        assert "2 of 5 source(s) have no *balanced* vectors" in text
+        assert "**Chapter 4** (23 pages)" in text and "**Chapter 5** (44 pages)" in text
+        assert "67 pages in all" in text
+        assert "about 2 min" in text
+        assert "default estimate" in text
+        assert "*fast*, which every source already has" in text
+
+    def test_no_alternative_when_none_is_shared(self):
+        assert "already has" not in app._gap_message(self._gap([]), total=2)
+
+    def test_search_waits_until_embed_now_is_clicked(self, monkeypatch):
+        import dsearch.app as app_module
+
+        embedded: list[str] = []
+        monkeypatch.setattr(app_module, "list_sources", lambda: self._gap([]).missing)
+        monkeypatch.setattr(app_module, "tier_gap", lambda tier, scoped: self._gap(["fast"]))
+        monkeypatch.setattr(app_module.st, "warning", lambda *a, **kw: None)
+        monkeypatch.setattr(app_module, "_embed_missing", lambda gap: embedded.append(gap.tier))
+
+        monkeypatch.setattr(app_module.st, "button", lambda *a, **kw: False)
+        assert app_module._ensure_tier("balanced", None) is False
+        assert embedded == []
+
+        monkeypatch.setattr(app_module.st, "button", lambda *a, **kw: True)
+        assert app_module._ensure_tier("balanced", None) is True
+        assert embedded == ["balanced"]
+
+    def test_tiers_summary_lists_each_source(self, monkeypatch):
+        import dsearch.app as app_module
+
+        monkeypatch.setattr(app_module, "available_tiers", lambda sid: ["fast", "best"])
+        text = app_module._tiers_summary(self._gap([]).missing)
+        assert "**Chapter 4**: fast, best" in text
+        assert "**Chapter 5**: fast, best" in text

@@ -312,3 +312,36 @@ defended or reversed on purpose.
 - **Author and title inputs disappear when more than one file is selected**,
   rather than being disabled with a tooltip, because a disabled field that
   still shows a typed value invites the belief that it will be applied.
+
+### Lazy per-tier embedding
+
+- **The tier check reads vector files from disk, not `meta.tiers`.** A file
+  that is missing is a gap whatever the metadata says; `dsearch list` uses the
+  same on-disk answer so the two can never disagree.
+- **The throughput rate is measured inside `embed_texts`, after the model is
+  loaded.** The first run of a tier includes a model download that can dwarf
+  the embedding itself; starting the clock after `load_model` keeps that out
+  of the number. Runs under 5 pages are not recorded because a tiny file
+  gives a noisy rate, and the spec's "first run" is honoured literally: a
+  recorded rate is never overwritten.
+- **Default rates are pessimistic** (3 / 0.6 / 0.5 pages per second for fast /
+  balanced / best). An estimate that runs long is a pleasant surprise; one
+  that runs short is a broken promise. The prompt says which kind it is.
+- **Declining the prompt exits 0 and runs no search.** Saying no is a choice,
+  not an error, and searching the subset that *does* have the tier would
+  quietly answer a different question than the one asked. Non-interactive
+  stdin (a pipe, a script) counts as no, so nothing long ever starts
+  unattended.
+- **The alternative named in the prompt is the first tier every in-scope
+  source has, in tier order.** Naming all of them would make the prompt a
+  paragraph; the first is enough to get a result without waiting.
+- **In Streamlit, the search that triggered the warning is kept in session
+  state.** Clicking "Embed now" reruns the script, which would otherwise
+  forget the query; the pending search resumes once the tier is present, and
+  stays on screen through later table edits.
+- **`dsearch embed` runs the stale-index upgrade first**, like `search`. A
+  pre-warm that embedded old chunks would have to be redone on the next
+  search.
+- **`--source` on `embed` is repeatable** (`--source a --source b`) rather than
+  comma-separated, which is Typer's convention and copes with titles that
+  contain commas.

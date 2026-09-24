@@ -434,3 +434,106 @@ class TestEdit:
             index.add(pdf_factory(name=f"book{n}.pdf", pages=[f"{BODY} Book {n}."] * 3))
         index.edit("book1", title="First")
         assert [s.filename for s in index.list_sources()] == ["book1.pdf", "book2.pdf", "book3.pdf"]
+
+
+class TestEmbedRate:
+    """Time estimates come from a measured rate, or a pessimistic default."""
+
+    def test_default_until_measured(self):
+        rate, measured = index.embed_rate("balanced")
+        assert rate == index.DEFAULT_PAGES_PER_SECOND["balanced"]
+        assert measured is False
+
+    def test_first_run_is_recorded(self):
+        index.record_embed_rate("fast", pages=40, seconds=10.0)
+        assert index.embed_rate("fast") == (4.0, True)
+        assert json.loads(index.config_path().read_text())["pages_per_second"]["fast"] == 4.0
+
+    def test_later_runs_do_not_overwrite_the_first(self):
+        index.record_embed_rate("fast", pages=40, seconds=10.0)
+        index.record_embed_rate("fast", pages=40, seconds=1.0)
+        assert index.embed_rate("fast")[0] == 4.0
+
+    def test_tiny_runs_are_ignored(self):
+        index.record_embed_rate("fast", pages=index.MIN_PAGES_FOR_RATE - 1, seconds=0.1)
+        assert index.embed_rate("fast")[1] is False
+
+    def test_tiers_are_independent(self):
+        index.record_embed_rate("fast", pages=40, seconds=10.0)
+        assert index.embed_rate("best")[1] is False
+
+    def test_corrupt_config_is_treated_as_empty(self):
+        index.config_path().parent.mkdir(parents=True, exist_ok=True)
+        index.config_path().write_text("{ nope")
+        assert index.embed_rate("fast")[1] is False
+
+    @pytest.mark.parametrize(
+        ("seconds", "expected"),
+        [(0.2, "about 1 s"), (42, "about 42 s"), (150, "about 2 min"), (3600, "about 1 h")],
+    )
+    def test_format_duration(self, seconds, expected):
+        assert index.format_duration(seconds) == expected
+
+    def test_format_duration_with_hours_and_minutes(self):
+        assert index.format_duration(4200) == "about 1 h 10 min"
+
+
+class TestTierGap:
+    @pytest.fixture
+    def shelf(self, pdf_factory):
+        one = index.add(pdf_factory(name="one.pdf", pages=[f"{BODY} One."] * 4)).meta
+        two = index.add(pdf_factory(name="two.pdf", pages=[f"{BODY} Two."] * 6)).meta
+        return [one, two]
+
+    def test_no_gap_at_a_tier_everyone_has(self, shelf):
+        gap = index.tier_gap("fast", shelf)
+        assert gap.is_empty
+        assert gap.pages == 0
+
+    def test_names_the_missing_sources_and_sums_their_pages(self, shelf):
+        gap = index.tier_gap("balanced", shelf)
+        assert [m.filename for m in gap.missing] == ["one.pdf", "two.pdf"]
+        assert gap.pages == 10
+        assert gap.seconds == 10 / index.DEFAULT_PAGES_PER_SECOND["balanced"]
+        assert gap.rate_measured is False
+
+    def test_only_the_sources_that_lack_the_tier(self, shelf):
+        index.embed_source(shelf[0], "balanced")
+        gap = index.tier_gap("balanced", shelf)
+        assert [m.filename for m in gap.missing] == ["two.pdf"]
+        assert gap.pages == 6
+
+    def test_alternatives_are_tiers_every_source_has(self, shelf):
+        assert index.tier_gap("balanced", shelf).alternatives == ["fast"]
+        index.embed_source(shelf[0], "best")
+        assert index.tier_gap("balanced", shelf).alternatives == ["fast"]  # Only one has best.
+
+    def test_uses_a_measured_rate_when_there_is_one(self, shelf):
+        index.record_embed_rate("balanced", pages=100, seconds=50.0)
+        gap = index.tier_gap("balanced", shelf)
+        assert gap.seconds == 5.0
+        assert gap.rate_measured is True
+
+    def test_reads_tiers_from_disk_not_metadata(self, shelf):
+        # A vector file that vanished (or was never written) is a real gap even
+        # if meta.json still lists the tier.
+        index.vectors_path(shelf[0].source_id, "fast").unlink()
+        assert [m.filename for m in index.tier_gap("fast", shelf).missing] == ["one.pdf"]
+        assert index.available_tiers(shelf[1].source_id) == ["fast"]
+
+    def test_rejects_unknown_tier(self, shelf):
+        with pytest.raises(ValueError, match="Unknown tier"):
+            index.tier_gap("turbo", shelf)
+
+
+class TestEmbedSource:
+    def test_adds_only_the_requested_tier(self, book):
+        meta = index.add(book, tier="fast").meta
+        fast = index.vectors_path(meta.source_id, "fast").read_bytes()
+        chunks = (index.source_dir(meta.source_id) / "chunks.jsonl").read_bytes()
+        updated = index.embed_source(meta, "best")
+        assert sorted(updated.tiers) == ["best", "fast"]
+        assert index.vectors_path(meta.source_id, "best").is_file()
+        assert index.vectors_path(meta.source_id, "fast").read_bytes() == fast
+        assert (index.source_dir(meta.source_id) / "chunks.jsonl").read_bytes() == chunks
+        assert sorted(index.list_sources()[0].tiers) == ["best", "fast"]

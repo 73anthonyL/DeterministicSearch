@@ -287,3 +287,92 @@ class TestStaleIndex:
         assert "re-extracted" in result.output
         assert index.list_sources()[0].index_version == index.INDEX_VERSION
         assert "Holmes, Seth." in result.output  # And the search still ran.
+
+
+class TestLazyTierEmbedding:
+    """Searching at a tier the library lacks asks first, then embeds only that tier."""
+
+    def test_prompt_names_sources_pages_estimate_and_alternative(self, added):
+        result = runner.invoke(app, ["search", "knee pain", "--tier", "balanced"], input="n\n")
+        assert result.exit_code == 0, result.output
+        out = result.output
+        assert "1 of 1 source(s) have no balanced vectors" in out
+        assert "Fresh Fruit, Broken Bodies (5 pages)" in out
+        assert "5 pages in all" in out
+        assert "would take about" in out
+        assert "--tier fast" in out
+        assert "[y/N]" in out
+        assert "Nothing embedded" in out
+        assert not index.vectors_path(index.list_sources()[0].source_id, "balanced").is_file()
+
+    def test_default_answer_is_no(self, added):
+        result = runner.invoke(app, ["search", "knee pain", "--tier", "balanced"], input="\n")
+        assert "Nothing embedded" in result.output
+        assert "Holmes, Seth." not in result.output
+
+    def test_non_interactive_stdin_counts_as_no(self, added):
+        result = runner.invoke(app, ["search", "knee pain", "--tier", "balanced"], input="")
+        assert result.exit_code == 0
+        assert "Nothing embedded" in result.output
+
+    def test_yes_embeds_only_the_missing_tier_and_searches(self, added):
+        meta = index.list_sources()[0]
+        fast = index.vectors_path(meta.source_id, "fast").read_bytes()
+        result = runner.invoke(app, ["search", "knee pain", "--tier", "balanced"], input="y\n")
+        assert result.exit_code == 0, result.output
+        assert "Embedded" in result.output
+        assert "Holmes, Seth." in result.output
+        assert index.vectors_path(meta.source_id, "balanced").is_file()
+        assert index.vectors_path(meta.source_id, "fast").read_bytes() == fast
+
+    def test_yes_flag_skips_the_prompt(self, added):
+        result = runner.invoke(app, ["search", "knee pain", "--tier", "balanced", "--yes"])
+        assert result.exit_code == 0, result.output
+        assert "[y/N]" not in result.output
+        assert "Holmes, Seth." in result.output
+
+    def test_no_prompt_once_the_tier_exists(self, added):
+        runner.invoke(app, ["search", "knee pain", "--tier", "balanced", "--yes"])
+        result = runner.invoke(app, ["search", "knee pain", "--tier", "balanced"])
+        assert "[y/N]" not in result.output
+        assert "Holmes, Seth." in result.output
+
+    def test_no_alternative_named_when_none_is_shared(self, added, pdf_factory):
+        other = pdf_factory(name="other.pdf", pages=[f"{BODY} Other book."] * 3)
+        runner.invoke(app, ["add", str(other), "--tier", "best"])
+        result = runner.invoke(app, ["search", "knee", "--tier", "balanced"], input="n\n")
+        assert "2 of 2 source(s)" in result.output
+        assert "already have" not in result.output
+
+
+class TestEmbedCommand:
+    def test_pre_warms_a_tier_across_the_library(self, added, pdf_factory):
+        other = pdf_factory(name="other.pdf", pages=[f"{BODY} Other book."] * 3)
+        runner.invoke(app, ["add", str(other)])
+        result = runner.invoke(app, ["embed", "--tier", "balanced"])
+        assert result.exit_code == 0, result.output
+        assert result.output.count("Embedded") == 2
+        assert all("balanced" in index.available_tiers(s.source_id) for s in index.list_sources())
+
+    def test_limits_to_named_sources(self, added, pdf_factory):
+        other = pdf_factory(name="other.pdf", pages=[f"{BODY} Other book."] * 3)
+        runner.invoke(app, ["add", str(other)])
+        result = runner.invoke(app, ["embed", "--tier", "balanced", "--source", "other"])
+        assert result.exit_code == 0, result.output
+        tiers = {s.filename: index.available_tiers(s.source_id) for s in index.list_sources()}
+        assert tiers == {"ffbb.pdf": ["fast"], "other.pdf": ["fast", "balanced"]}
+
+    def test_nothing_to_do_when_already_present(self, added):
+        result = runner.invoke(app, ["embed", "--tier", "fast"])
+        assert result.exit_code == 0
+        assert "Nothing to do" in result.output
+
+    def test_empty_library(self):
+        result = runner.invoke(app, ["embed", "--tier", "fast"])
+        assert result.exit_code == 0
+        assert "empty" in result.output
+
+    def test_list_shows_tiers_per_source(self, added):
+        runner.invoke(app, ["embed", "--tier", "best"])
+        out = runner.invoke(app, ["list"]).output
+        assert "fast, best" in out

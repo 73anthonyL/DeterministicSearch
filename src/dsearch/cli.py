@@ -29,9 +29,15 @@ from dsearch.index import (
     TIERS,
     AddResult,
     AmbiguousSourceError,
+    SourceMeta,
     SourceNotFoundError,
+    TierGap,
+    available_tiers,
+    embed_source,
+    format_duration,
     home,
     resolve_source,
+    tier_gap,
     upgrade_stale,
 )
 from dsearch.index import (
@@ -154,16 +160,72 @@ def _note(message: str) -> None:
     console.print(f"[yellow]Note[/yellow] {message}")
 
 
-def _upgrade_stale_sources(source: str | None) -> None:
+def _scoped_sources(source: str | None) -> list[SourceMeta]:
+    """The sources a search or embed will touch: one named source, or all."""
+    return [resolve_source(source)] if source else index_list()
+
+
+def _upgrade_stale_sources(sources: list[SourceMeta]) -> list[SourceMeta]:
     """Rebuild any in-scope source indexed by an older pipeline before searching."""
-    scoped = [resolve_source(source)] if source else index_list()
     with _page_progress() as progress:
         task = progress.add_task("Re-indexing", total=None)
 
         def tick(done: int, total: int) -> None:
             progress.update(task, completed=done, total=total)
 
-        upgrade_stale(scoped, progress=tick, notify=_note)
+        return upgrade_stale(sources, progress=tick, notify=_note)
+
+
+def _describe_gap(gap: TierGap, total: int) -> None:
+    """Say which sources lack the tier and how long filling it should take."""
+    names = ", ".join(f"{m.title} ({m.page_count} pages)" for m in gap.missing)
+    console.print(
+        f"[yellow]Note[/yellow] {len(gap.missing)} of {total} source(s) have no "
+        f"[bold]{gap.tier}[/bold] vectors: {names} — {gap.pages} pages in all."
+    )
+    basis = "measured on this machine" if gap.rate_measured else "default estimate until measured"
+    console.print(
+        f"       Embedding them would take {format_duration(gap.seconds)} "
+        f"({basis}) and only adds [bold]{gap.tier}[/bold] vectors — nothing else is touched."
+    )
+
+
+def _confirm_embedding(gap: TierGap) -> bool:
+    """Ask before a long job, naming the tier that needs no wait when there is one."""
+    prompt = f"Embed {gap.tier} vectors for {len(gap.missing)} source(s) now?"
+    if gap.alternatives:
+        prompt += f" (or run with `--tier {gap.alternatives[0]}`, which all sources already have)"
+    try:
+        return typer.confirm(prompt, default=False)
+    except typer.Abort:  # Non-interactive stdin: the safe answer is no.
+        console.print()
+        return False
+
+
+def _embed_missing(gap: TierGap) -> None:
+    """Embed only the missing sources at only `gap.tier`, with book and page progress."""
+    with _page_progress() as progress:
+        overall = None
+        if len(gap.missing) > 1:
+            overall = progress.add_task("Books", total=len(gap.missing))
+        pages = progress.add_task("", total=None)
+
+        def tick(done: int, total: int) -> None:
+            progress.update(pages, completed=done, total=total)
+
+        for position, meta in enumerate(gap.missing, start=1):
+            if overall is not None:
+                progress.update(
+                    overall,
+                    completed=position - 1,
+                    description=f"Book {position} of {len(gap.missing)}: [bold]{meta.title}[/bold]",
+                )
+            progress.reset(pages, total=None, description=f"Embedding [bold]{meta.title}[/bold]")
+            embed_source(meta, gap.tier, progress=tick)
+            console.print(
+                f"[green]Embedded[/green] [bold]{meta.title}[/bold] ({meta.short_id}) "
+                f"at tier [bold]{gap.tier}[/bold]."
+            )
 
 
 def _expand_paths(patterns: list[str]) -> list[Path]:
@@ -286,7 +348,7 @@ def list_command() -> None:
             source.author or "[dim]unknown[/dim]",
             str(source.page_count),
             str(source.chunk_count),
-            ", ".join(source.tiers) or "[dim]none[/dim]",
+            ", ".join(available_tiers(source.source_id)) or "[dim]none[/dim]",
             source.added,
         )
     console.print(table)
@@ -328,10 +390,20 @@ def search(
     k: Annotated[int, typer.Option("--k", "-k", help="How many passages to return.")] = DEFAULT_K,
     source: Annotated[str | None, typer.Option(help="Limit to one source.")] = None,
     tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Embed missing tiers without asking.")
+    ] = False,
 ) -> None:
     """Find page-cited passages that answer a query."""
     try:
-        _upgrade_stale_sources(source)
+        scoped = _upgrade_stale_sources(_scoped_sources(source))
+        gap = tier_gap(tier, scoped)
+        if not gap.is_empty:
+            _describe_gap(gap, len(scoped))
+            if not (yes or _confirm_embedding(gap)):
+                console.print("[dim]Nothing embedded; search not run.[/dim]")
+                return
+            _embed_missing(gap)
         results = run_search(query, k=k, tier=tier, source=source)
     except (SourceNotFoundError, AmbiguousSourceError) as exc:
         _fail(str(exc))
@@ -348,6 +420,35 @@ def search(
     console.print()
     for position, result in enumerate(results, start=1):
         console.print(_panel(result, position))
+
+
+@app.command()
+def embed(
+    tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
+    source: Annotated[
+        list[str] | None,
+        typer.Option(help="Limit to these sources (repeatable). Default: the whole library."),
+    ] = None,
+) -> None:
+    """Pre-embed a quality tier so later searches at it never have to wait."""
+    try:
+        scoped = [resolve_source(name) for name in source] if source else index_list()
+        scoped = _upgrade_stale_sources(scoped)
+        gap = tier_gap(tier, scoped)
+    except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+        _fail(str(exc))
+
+    if not scoped:
+        console.print("[dim]Your library is empty. Add a PDF with[/dim] dsearch add <file.pdf>")
+        return
+    if gap.is_empty:
+        console.print(
+            f"[green]Nothing to do[/green] — all {len(scoped)} source(s) already have "
+            f"[bold]{tier}[/bold] vectors."
+        )
+        return
+    _describe_gap(gap, len(scoped))
+    _embed_missing(gap)
 
 
 def _version_callback(value: bool) -> None:

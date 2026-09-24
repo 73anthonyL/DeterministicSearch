@@ -24,11 +24,16 @@ from dsearch.index import (
     AmbiguousSourceError,
     SourceMeta,
     SourceNotFoundError,
+    TierGap,
     add,
+    available_tiers,
     edit,
+    embed_source,
+    format_duration,
     list_sources,
     remove,
     resolve_source,
+    tier_gap,
     upgrade_stale,
 )
 from dsearch.search import DEFAULT_K, Result, search
@@ -227,6 +232,63 @@ def _upgrade_stale_sources(source: str | None) -> None:
     bar.empty()
 
 
+def _tiers_summary(sources: list[SourceMeta]) -> str:
+    """One line per source naming the tiers it already has, for the sidebar."""
+    lines = []
+    for meta in sources:
+        tiers = ", ".join(available_tiers(meta.source_id)) or "none"
+        lines.append(f"**{meta.title}**: {tiers}")
+    return "Tiers already embedded —  \n" + "  \n".join(lines)
+
+
+def _gap_message(gap: TierGap, total: int) -> str:
+    """The warning shown before a search that would first need to embed."""
+    names = ", ".join(f"**{m.title}** ({m.page_count} pages)" for m in gap.missing)
+    basis = "measured on this machine" if gap.rate_measured else "a default estimate until measured"
+    text = (
+        f"{len(gap.missing)} of {total} source(s) have no *{gap.tier}* vectors: {names} — "
+        f"{gap.pages} pages in all. Embedding them would take {format_duration(gap.seconds)} "
+        f"({basis}) and adds only *{gap.tier}* vectors; nothing else is touched."
+    )
+    if gap.alternatives:
+        text += f" Or switch the tier to *{gap.alternatives[0]}*, which every source already has."
+    return text
+
+
+def _embed_missing(gap: TierGap) -> None:
+    """Embed only the missing sources at only `gap.tier`, with one combined bar."""
+    total_books = len(gap.missing)
+    bar = st.progress(0.0, text="Loading model…")
+    for position, meta in enumerate(gap.missing, start=1):
+
+        def tick(done: int, total: int, position: int = position, title: str = meta.title) -> None:
+            fraction = (position - 1 + done / max(total, 1)) / total_books
+            bar.progress(
+                min(fraction, 1.0),
+                text=f"Book {position} of {total_books}: {title} — page {done} of {total}",
+            )
+
+        embed_source(meta, gap.tier, progress=tick)
+    bar.empty()
+
+
+def _ensure_tier(tier: str, source: str | None) -> bool:
+    """True when every in-scope source has `tier` vectors — embedding on request.
+
+    A search at a tier the library lacks is not started silently: the gap and
+    its cost are shown and the search waits for "Embed now".
+    """
+    scoped = [resolve_source(source)] if source else list_sources()
+    gap = tier_gap(tier, scoped)
+    if gap.is_empty:
+        return True
+    st.warning(_gap_message(gap, len(scoped)))
+    if not st.button(f"Embed now ({format_duration(gap.seconds)})", key="embed_now"):
+        return False
+    _embed_missing(gap)
+    return True
+
+
 def _sidebar() -> tuple[str, str | None]:
     """Library management. Returns the chosen tier and source filter.
 
@@ -249,6 +311,7 @@ def _sidebar() -> tuple[str, str | None]:
 
         sources = list_sources()
         if sources:
+            st.caption(_tiers_summary(sources))
             names = ["All sources"] + [s.title for s in sources]
             chosen = st.selectbox("Search in", names, key="source_filter")
             source = None if chosen == "All sources" else chosen
@@ -324,18 +387,28 @@ def main() -> None:
     )
     k = st.slider("Passages to return", MIN_K, MAX_K, DEFAULT_K, key="k")
 
-    if not st.button("Search", type="primary", key="search") or not query.strip():
-        if not list_sources():
+    # Clicking "Embed now" reruns the script, so the search that asked for it
+    # is remembered in session state and resumed once the tier is present.
+    if st.button("Search", type="primary", key="search") and query.strip():
+        st.session_state["pending"] = {"query": query, "k": k, "tier": tier, "source": source}
+    pending = st.session_state.get("pending")
+    if not pending:
+        if not sources:
             st.info("Add a PDF in the sidebar to get started.")
         return
 
     try:
-        _upgrade_stale_sources(source)
+        _upgrade_stale_sources(pending["source"])
+        if not _ensure_tier(pending["tier"], pending["source"]):
+            return
         with st.spinner("Searching…"):
-            results = search(query, k=k, tier=tier, source=source)
+            results = search(
+                pending["query"], k=pending["k"], tier=pending["tier"], source=pending["source"]
+            )
     except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
         st.error(str(exc))
         return
+    tier = pending["tier"]
 
     if not results:
         st.warning(
