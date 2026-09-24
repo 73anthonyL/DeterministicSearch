@@ -201,3 +201,11 @@ defended or reversed on purpose.
   button — the "copyable citation block" the spec asks for.
 - **Library management (tier, source filter, add, remove) lives in the sidebar**
   so the main column is only query and evidence.
+- **Every Streamlit widget carries an explicit `key`.** Without one, Streamlit
+  identifies a widget by its position in the tree, and this sidebar changes
+  shape the moment the library stops being empty (the "Search in" selector
+  appears). Keys make the author, title, and tier survive that reshuffle.
+- **An upload is written into a temp *directory* under its own filename**, not
+  to a generated temp name. The library records `path.name`, so the alternative
+  stored `tmpjzua04hj.pdf` — meaningless in `dsearch list` and unusable as an
+  argument to `dsearch remove`.

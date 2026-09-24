@@ -94,3 +94,42 @@ class TestModuleShape:
         from dsearch.index import TIERS
 
         assert set(app.TIER_NOTES) == set(TIERS)
+
+
+class TestUploadNaming:
+    """An upload must keep its own filename in the library."""
+
+    def test_temp_path_uses_the_upload_name(self, tmp_path, monkeypatch):
+        # The library records `path.name`, so writing the upload under a
+        # generated temp name would store "tmpjzua04hj.pdf" and make the source
+        # unrecognisable in `dsearch list` and unusable with `dsearch remove`.
+        import dsearch.app as app_module
+
+        captured: dict[str, object] = {}
+
+        class FakeUpload:
+            name = "Chapter2.pdf"
+
+            def getbuffer(self):
+                return b"%PDF-1.4 fake"
+
+        def fake_add(path, **kwargs):
+            captured["name"] = path.name
+            captured["exists"] = path.is_file()
+            raise ValueError("stop here — naming is all this test checks")
+
+        monkeypatch.setattr(app_module, "add", fake_add)
+        monkeypatch.setattr(app_module.st, "progress", lambda *a, **kw: _NullBar())
+        monkeypatch.setattr(app_module.st, "error", lambda *a, **kw: None)
+
+        app_module._index_upload(FakeUpload(), "", "", "fast", 3, 1)
+        assert captured["name"] == "Chapter2.pdf"
+        assert captured["exists"] is True
+
+
+class _NullBar:
+    def progress(self, *args, **kwargs):
+        pass
+
+    def empty(self):
+        pass

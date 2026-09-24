@@ -95,10 +95,12 @@ def _index_upload(upload, author: str, title: str, tier: str, size: int, overlap
     Indexing is keyed by the SHA-256 of the bytes, so re-uploading the same file
     costs nothing — the hash is checked before any work happens.
     """
-    suffix = Path(upload.name).suffix or ".pdf"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
-        handle.write(upload.getbuffer())
-        temp_path = Path(handle.name)
+    # Write into a temp *directory* under the upload's own name, so the library
+    # records "Chapter2.pdf" rather than an opaque "tmpjzua04hj.pdf" that no
+    # user could later recognise or pass to `dsearch remove`.
+    temp_dir = Path(tempfile.mkdtemp())
+    temp_path = temp_dir / Path(upload.name).name
+    temp_path.write_bytes(upload.getbuffer())
 
     bar = st.progress(0.0, text="Reading pages…")
 
@@ -125,6 +127,7 @@ def _index_upload(upload, author: str, title: str, tier: str, size: int, overlap
         return
     finally:
         temp_path.unlink(missing_ok=True)
+        temp_dir.rmdir()
 
     bar.empty()
     meta = result.meta
@@ -140,7 +143,14 @@ def _index_upload(upload, author: str, title: str, tier: str, size: int, overlap
 
 
 def _sidebar() -> tuple[str, str | None]:
-    """Library management. Returns the chosen tier and source filter."""
+    """Library management. Returns the chosen tier and source filter.
+
+    Every widget carries an explicit `key`. Without one, Streamlit identifies a
+    widget by its position in the tree, and this sidebar changes shape as soon
+    as the library stops being empty (the "Search in" selector appears). That
+    shift silently dropped the author typed before the first index, so the
+    citation came out with no author at all.
+    """
     with st.sidebar:
         st.header("Library")
         tier = st.selectbox(
@@ -148,13 +158,14 @@ def _sidebar() -> tuple[str, str | None]:
             list(TIERS),
             index=list(TIERS).index(DEFAULT_TIER),
             help="Which embedding model to index and search with.",
+            key="tier",
         )
         st.caption(TIER_NOTES[tier])
 
         sources = list_sources()
         if sources:
             names = ["All sources"] + [s.title for s in sources]
-            chosen = st.selectbox("Search in", names)
+            chosen = st.selectbox("Search in", names, key="source_filter")
             source = None if chosen == "All sources" else chosen
         else:
             source = None
@@ -162,13 +173,13 @@ def _sidebar() -> tuple[str, str | None]:
 
         st.divider()
         st.subheader("Add a PDF")
-        upload = st.file_uploader("Drag and drop a PDF", type=["pdf"])
-        author = st.text_input("Author", placeholder="Seth Holmes")
-        title = st.text_input("Title", placeholder="Fresh Fruit, Broken Bodies")
+        upload = st.file_uploader("Drag and drop a PDF", type=["pdf"], key="upload")
+        author = st.text_input("Author", placeholder="Seth Holmes", key="author")
+        title = st.text_input("Title", placeholder="Fresh Fruit, Broken Bodies", key="title")
         with st.expander("Chunking"):
-            size = st.number_input("Sentences per chunk", 1, 10, DEFAULT_SIZE)
-            overlap = st.number_input("Overlap", 0, 9, DEFAULT_OVERLAP)
-        if upload is not None and st.button("Index this PDF", type="primary"):
+            size = st.number_input("Sentences per chunk", 1, 10, DEFAULT_SIZE, key="chunk_size")
+            overlap = st.number_input("Overlap", 0, 9, DEFAULT_OVERLAP, key="overlap")
+        if upload is not None and st.button("Index this PDF", type="primary", key="index"):
             if overlap >= size:
                 st.error("Overlap must be smaller than the chunk size.")
             else:
@@ -208,14 +219,15 @@ def main() -> None:
     query = st.text_area(
         "What are you looking for?",
         height=120,
+        key="query",
         placeholder=(
             "Ask a question, name a concept, or paste a whole paragraph of your own thinking — "
             "long queries are scored sentence by sentence."
         ),
     )
-    k = st.slider("Passages to return", MIN_K, MAX_K, DEFAULT_K)
+    k = st.slider("Passages to return", MIN_K, MAX_K, DEFAULT_K, key="k")
 
-    if not st.button("Search", type="primary") or not query.strip():
+    if not st.button("Search", type="primary", key="search") or not query.strip():
         if not list_sources():
             st.info("Add a PDF in the sidebar to get started.")
         return
