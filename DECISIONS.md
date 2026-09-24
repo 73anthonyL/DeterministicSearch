@@ -172,3 +172,18 @@ defended or reversed on purpose.
 - **Embeddings are stubbed with a deterministic bag-of-words vector** in the
   index, search, and CLI tests, so the suite runs offline in seconds and ranking
   assertions are stable. The real models are exercised in the end-to-end run.
+
+## Streamlit app
+
+- **`app.py` contains no retrieval logic.** It calls exactly the functions the
+  CLI calls, so the two front ends can never drift apart in ranking.
+- **The entry point is guarded by `if __name__ == "__main__"`.** Streamlit runs
+  a script with `__name__ == "__main__"`, so this changes nothing about
+  `streamlit run` while making the module importable for unit tests.
+- **The upload is written to a temp file and deleted in a `finally`.** Indexing
+  needs a path for pymupdf; the library keys on the SHA-256 of the bytes, so the
+  temp path is irrelevant to caching and re-uploading the same file is free.
+- **Citations are shown through `st.code`,** which renders a one-click copy
+  button — the "copyable citation block" the spec asks for.
+- **Library management (tier, source filter, add, remove) lives in the sidebar**
+  so the main column is only query and evidence.
