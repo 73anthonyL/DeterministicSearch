@@ -126,3 +126,22 @@ defended or reversed on purpose.
   block searching the rest of the library.
 - **Context neighbours stop at a source boundary**, so the passage above a
   result is never from a different book.
+
+## Citation
+
+- **The spec's citation line is produced exactly**
+  (`Holmes, Seth. *Fresh Fruit, Broken Bodies*. p. 47.`), with the title
+  italicised using markdown asterisks so `rich` and Streamlit both render it.
+- **An in-text parenthetical (`(Holmes 47)`) is offered alongside the full
+  reference.** The full line belongs in a works-cited list; the parenthetical is
+  what actually goes next to the quotation in the body of an essay, and it is
+  the thing a student pastes most often.
+- **MLA 9 terminal punctuation is handled per kind.** A final period is dropped
+  from the quotation and reappears after the parenthetical; a question mark or
+  exclamation point is part of the quoted words and stays inside the quotation
+  marks, with a period after the parenthetical.
+- **Unknown elements are omitted, never invented.** A source with no author
+  begins its citation with the title; a page with no printed folio cites
+  `PDF p. 59`, explicitly labelled so it is not mistaken for a printed page.
+- **Three or more authors collapse to "et al."**, per MLA 9; two are joined with
+  "and" and only the first is inverted.
