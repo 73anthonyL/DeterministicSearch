@@ -35,3 +35,36 @@ defended or reversed on purpose.
   authoritative when present. The font heuristic calls a line a heading when it
   is >= 1.25x the modal span size, is <= 90 characters, and is not itself a page
   number. Both approaches carry the last-seen title forward across pages.
+
+## Chunking
+
+- **Chunks never span a page break.** The product promise is a passage a reader
+  can cite to an exact page, so windowing restarts on each page. The costs are a
+  short chunk at the foot of every page and a sentence broken by a page break
+  being chunked as two fragments. Letting windows cross pages would produce
+  slightly better passages but would make `p. 47` a guess.
+- **`chunk_id` is a 0-based integer index within its source, and doubles as the
+  row index into `vectors_<tier>.npy`.** A chunk is identified globally by
+  (`source_id`, `chunk_id`). This keeps the vector/metadata join implicit, which
+  the planned 2D embedding map depends on.
+- **`chunk()` takes a keyword-only `source_id`.** The spec's signature omits it
+  but `Chunk` carries it, so it has to be threaded in; keyword-only keeps the
+  documented positional signature `chunk(pages, size, overlap)` intact.
+- **Text is cleaned before splitting: de-hyphenation, running-head removal, bare
+  folio removal, and reflow.** PyMuPDF preserves the typesetter's hard line
+  breaks, so without this a quoted sentence reads
+  `"my compan- ions"` or carries `i n t r o d u c t i o n 3` spliced onto its
+  front. `Page.text` itself stays a faithful copy of the PDF; the cleaning lives
+  in `chunk` so that extraction never invents or drops content.
+- **Running heads are detected by repetition across pages, at a 30% threshold.**
+  Books alternate the head between verso and recto, so each variant appears on
+  only ~48% of pages (measured in the samples); the next most repeated line
+  appears on ~5%. 30% separates them with room to spare. Detection is skipped
+  for sources under 4 pages, where repetition proves nothing.
+- **Sentence splitting is a regex with an abbreviation list, per the spec's "no
+  NLTK download".** Known limitation, covered by a test: a sentence that
+  genuinely *ends* in an abbreviation ("He worked for the co. They left.") is
+  joined to the next one. Over-joining is safer than over-splitting here,
+  because a split mid-sentence would truncate quoted evidence.
+- **Roman-numeral and bare-integer lines are dropped as folios during cleaning**,
+  matching the extraction rule.
