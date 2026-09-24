@@ -47,13 +47,13 @@ $ dsearch --help
 
 ## Usage
 
-### `add` — index a PDF
+### `add` — index one or more PDFs
 
 ```
 $ dsearch add samples/Chapter3.pdf --author "Seth Holmes" \
-    --title "Chapter 3: Segregation on the Farm"
+    --title "Fresh Fruit, Broken Bodies"
 
-Indexed Chapter 3: Segregation on the Farm (ea63ed8d) — 43 pages, 397 chunks, tier fast.
+Indexed Fresh Fruit, Broken Bodies (ea63ed8d) — 43 pages, 407 chunks, tier fast.
 ```
 
 A progress bar counts through the pages while they are embedded. Sources are
@@ -63,24 +63,51 @@ under a different name — costs nothing:
 ```
 $ dsearch add samples/Chapter3.pdf
 
-Already indexed Chapter 3: Segregation on the Farm (ea63ed8d) at tier fast — nothing to do.
+Already indexed Fresh Fruit, Broken Bodies (ea63ed8d) at tier fast — skipped.
 ```
 
-Options: `--author`, `--title`, `--tier fast|balanced|best`, `--chunk-size`,
-`--overlap`.
+Several files, or a glob, go in one call. They are processed in order with a
+"book 2 of 5" bar above the page bar; anything already indexed is skipped with
+a note. With more than one file the author and title come from each PDF's own
+metadata (or its filename) — fix them afterwards with `edit`:
+
+```
+$ dsearch add samples/Chapter1.pdf samples/Chapter2.pdf
+
+Indexed Chapter 1 (eb815263) — 29 pages, 249 chunks, tier fast.
+Indexed Chapter 2 (7b4b8faf) — 15 pages, 107 chunks, tier fast.
+```
+
+Options: `--author`, `--title` (single file only), `--tier fast|balanced|best`,
+`--chunk-size`, `--overlap`.
+
+### `edit` — fix the citation metadata
+
+```
+$ dsearch edit eb815263 --author "Seth Holmes" --title "Fresh Fruit, Broken Bodies"
+
+Updated (eb815263) — Fresh Fruit, Broken Bodies by Seth Holmes.
+```
+
+Rewrites `meta.json` only; chunks and vectors are untouched. Citations resolve
+author and title from the `add`/`edit` flags, then the PDF's metadata, then a
+title-cased filename (`Chapter5.pdf` → "Chapter 5") — never the chapter.
 
 ### `list` — see your library
 
 ```
 $ dsearch list
 
-ID        Title                               Author       Pages  Chunks  Tiers  Added
-eb815263  Chapter 1: Introduction             Seth Holmes     29     246  fast   2026-09-24
-7b4b8faf  Chapter 2: We Are Field Workers     Seth Holmes     15      92  fast   2026-09-24
-ea63ed8d  Chapter 3: Segregation on the Farm  Seth Holmes     43     397  fast   2026-09-24
+ID        Title                       Author       Pages  Chunks  Tiers           Added
+eb815263  Fresh Fruit, Broken Bodies  Seth Holmes     29     249  fast, balanced  2026-09-24
+7b4b8faf  Fresh Fruit, Broken Bodies  Seth Holmes     15     107  fast, balanced  2026-09-24
+ea63ed8d  Fresh Fruit, Broken Bodies  Seth Holmes     43     407  fast            2026-09-24
 
 3 source(s) in /Users/anthony/.dsearch
 ```
+
+The Tiers column is read from the vector files on disk, so it always says
+which tiers a search can use without waiting.
 
 ### `search` — find evidence
 
@@ -165,6 +192,35 @@ recognize any of it as an injury caused by work rather than by the worker himsel
 dsearch search "housing in the camps" --k 20 --source "Chapter 3: Segregation on the Farm"
 ```
 
+### `embed` — pre-warm a quality tier
+
+Chunks do not depend on the tier; only `vectors_<tier>.npy` does. Searching at
+a tier some sources lack never re-extracts or re-chunks — it offers to embed
+just the missing vectors, after saying what that costs:
+
+```
+$ dsearch search "Triqui" --k 1 --tier balanced
+
+Note 5 of 5 source(s) have no balanced vectors: Fresh Fruit, Broken Bodies (29 pages), … — 154 pages in all.
+       Embedding them would take about 4 min (default estimate until measured) and only adds
+balanced vectors — nothing else is touched.
+Embed balanced vectors for 5 source(s) now? (or run with `--tier fast`, which all sources already have) [y/N]: n
+Nothing embedded; search not run.
+```
+
+`--yes` skips the question. The estimate uses a per-tier rate measured on the
+first real run and kept in `~/.dsearch/config.json`; until then it is a
+deliberately pessimistic default. To do the work ahead of time:
+
+```
+$ dsearch embed --tier balanced
+
+Embedded Fresh Fruit, Broken Bodies (eb815263) at tier balanced.
+…
+```
+
+`--source` limits it (repeatable).
+
 ### `remove` — drop a source
 
 ```
@@ -183,11 +239,15 @@ Accepts an id prefix, a filename, or a title.
 streamlit run src/dsearch/app.py
 ```
 
-Drag a PDF onto the sidebar, pick a quality tier, and watch the page counter
-during indexing. The query box takes paragraphs. Each result is the same card
-you get in the terminal, with a one-click copyable citation block. It calls
-exactly the same functions the CLI does, so the two can never disagree about
-ranking.
+Drag one or more PDFs onto the sidebar, pick a quality tier, and watch the
+"book 2 of 5 — page 10 of 44" counter during indexing. A library table above
+the query box lets you edit author and title in place (the same code path as
+`dsearch edit`). Searching at a tier some sources lack shows the cost and an
+"Embed now" button rather than starting a long job silently; the sidebar lists
+which tiers each source already has. The query box takes paragraphs. Each
+result is the same card you get in the terminal, with a one-click copyable
+citation block. It calls exactly the same functions the CLI does, so the two
+can never disagree about ranking.
 
 ---
 
@@ -198,8 +258,9 @@ ranking.
    printed on the paper rather than the PDF's own page count. Chapter titles come
    from the PDF outline, or failing that from font-size heading detection.
    Ligature glyphs are expanded, so a page reading "pay the fine" is never quoted
-   as "pay the  ne". A PDF with no text layer raises a clear error telling you to
-   OCR it.
+   as "pay the  ne", and superscript endnote markers are dropped, so
+   "competency.35" is quoted as "competency." A PDF with no text layer raises a
+   clear error telling you to OCR it.
 
 2. **Chunk** (`chunk.py`) — text is de-hyphenated, running heads are dropped, and
    prose is split into sentences with a regex. Sentences are then windowed into
@@ -231,8 +292,18 @@ ranking.
 | `balanced` | `all-mpnet-base-v2` | Better recall, slower |
 | `best` | `BAAI/bge-base-en-v1.5` | Highest quality, slowest |
 
-Re-adding a source at a new tier reuses the stored chunks and embeds only the
-missing vectors, so upgrading quality never re-extracts the PDF.
+Switching tiers reuses the stored chunks and embeds only the missing vectors,
+so upgrading quality never re-extracts the PDF and never removes another
+tier's vectors.
+
+### Index versions
+
+`meta.json` records the `index_version` that built each source. When a
+release changes extraction or chunking (v2 drops superscript endnote markers
+and cleans letter-spaced chapter titles), the next `add` or `search` rebuilds
+any older source from the path it was added from, saying so in one line. If
+the PDF has moved, the search says that instead and `dsearch add <pdf>`
+rebuilds it.
 
 ---
 
@@ -240,7 +311,7 @@ missing vectors, so upgrading quality never re-extracts the PDF.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 240 tests, no network required
+pytest          # 335 tests, no network required
 ruff check .
 ```
 
