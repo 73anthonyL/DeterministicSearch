@@ -114,6 +114,60 @@ class TestAdd:
         assert index.list_sources()[0].chunk_size == 2
 
 
+class TestMultiAdd:
+    """Several PDFs in one call, processed in order."""
+
+    @pytest.fixture
+    def shelf(self, pdf_factory):
+        return [
+            pdf_factory(name=f"book{n}.pdf", pages=[f"{BODY} Book number {n}."] * 3)
+            for n in (1, 2, 3)
+        ]
+
+    def test_indexes_every_file(self, shelf):
+        result = runner.invoke(app, ["add", *map(str, shelf)])
+        assert result.exit_code == 0, result.output
+        assert result.output.count("Indexed") == 3
+        assert [s.filename for s in index.list_sources()] == ["book1.pdf", "book2.pdf", "book3.pdf"]
+
+    def test_expands_a_quoted_glob(self, shelf):
+        pattern = str(shelf[0].parent / "book*.pdf")
+        result = runner.invoke(app, ["add", pattern])
+        assert result.exit_code == 0, result.output
+        assert len(index.list_sources()) == 3
+
+    def test_glob_matching_nothing_is_a_clean_error(self, tmp_path):
+        result = runner.invoke(app, ["add", str(tmp_path / "nothing*.pdf")])
+        assert result.exit_code == 1
+        assert "No files match" in result.output
+
+    def test_already_indexed_files_are_skipped_with_a_note(self, shelf):
+        runner.invoke(app, ["add", str(shelf[0])])
+        result = runner.invoke(app, ["add", *map(str, shelf)])
+        assert result.exit_code == 0, result.output
+        assert result.output.count("Already indexed") == 1
+        assert result.output.count("Indexed") == 2  # "Already indexed" does not contain "Indexed".
+
+    def test_rejects_author_and_title_for_several_files(self, shelf):
+        result = runner.invoke(app, ["add", *map(str, shelf), "--author", "Seth Holmes"])
+        assert result.exit_code == 1
+        assert "dsearch edit" in result.output
+        assert index.list_sources() == []
+
+    def test_one_bad_file_does_not_stop_the_rest(self, shelf, pdf_factory):
+        scan = pdf_factory(name="scan.pdf", pages=[""] * 5)
+        result = runner.invoke(app, ["add", str(shelf[0]), str(scan), str(shelf[1])])
+        assert result.exit_code == 1
+        assert "scan" in result.output.lower()
+        assert len(index.list_sources()) == 2
+
+    def test_metadata_comes_from_each_pdf(self, pdf_factory):
+        one = pdf_factory(name="one.pdf", pages=[BODY] * 3, metadata={"author": "A. One"})
+        two = pdf_factory(name="two.pdf", pages=[f"{BODY} Two."] * 3, metadata={"author": "B. Two"})
+        runner.invoke(app, ["add", str(one), str(two)])
+        assert [s.author for s in index.list_sources()] == ["A. One", "B. Two"]
+
+
 class TestList:
     def test_empty_library(self):
         result = runner.invoke(app, ["list"])

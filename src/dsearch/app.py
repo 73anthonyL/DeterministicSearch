@@ -22,8 +22,10 @@ from dsearch.index import (
     INDEX_VERSION,
     TIERS,
     AmbiguousSourceError,
+    SourceMeta,
     SourceNotFoundError,
     add,
+    edit,
     list_sources,
     remove,
     resolve_source,
@@ -92,58 +94,123 @@ def _render_result(result: Result, position: int) -> None:
             st.code(citation_block(result), language=None, wrap_lines=True)
 
 
-def _index_upload(upload, author: str, title: str, tier: str, size: int, overlap: int) -> None:
-    """Write the upload to a temp file and index it, showing page progress.
+def _index_uploads(uploads, author: str, title: str, tier: str, size: int, overlap: int) -> None:
+    """Index each upload in turn, with one bar showing book and page progress.
 
     Indexing is keyed by the SHA-256 of the bytes, so re-uploading the same file
-    costs nothing — the hash is checked before any work happens.
+    costs nothing — the hash is checked before any work happens. Author and
+    title typed in the sidebar apply only when a single file is uploaded; with
+    several, each PDF's own metadata is used and the table below corrects it.
     """
+    total_books = len(uploads)
+    bar = st.progress(0.0, text="Reading pages…")
+
+    for position, upload in enumerate(uploads, start=1):
+        book = f"Book {position} of {total_books}" if total_books > 1 else upload.name
+
+        def tick(done: int, total: int, book: str = book, position: int = position) -> None:
+            # Overall progress: books finished, plus this book's fraction.
+            fraction = (position - 1 + done / max(total, 1)) / total_books
+            bar.progress(min(fraction, 1.0), text=f"{book} — embedding page {done} of {total}")
+
+        result = _index_one(upload, author, title, tier, size, overlap, tick)
+        if result is None:
+            continue
+        meta = result.meta
+        if result.already_indexed:
+            st.info(f"**{meta.title}** is already indexed at the *{tier}* tier — skipped.")
+        else:
+            verb = "Rebuilt" if result.reindexed else "Indexed"
+            st.success(
+                f"{verb} **{meta.title}** — {meta.page_count} pages, "
+                f"{meta.chunk_count} chunks, *{tier}* tier."
+            )
+        if result.warning:
+            st.warning(result.warning)
+    bar.empty()
+
+
+def _index_one(upload, author: str, title: str, tier: str, size: int, overlap: int, tick):
+    """Write one upload to a temp file and index it; None if it failed."""
     # Write into a temp *directory* under the upload's own name, so the library
     # records "Chapter2.pdf" rather than an opaque "tmpjzua04hj.pdf" that no
     # user could later recognise or pass to `dsearch remove`.
     temp_dir = Path(tempfile.mkdtemp())
     temp_path = temp_dir / Path(upload.name).name
     temp_path.write_bytes(upload.getbuffer())
-
-    bar = st.progress(0.0, text="Reading pages…")
-
-    def tick(done: int, total: int) -> None:
-        bar.progress(min(done / max(total, 1), 1.0), text=f"Embedding page {done} of {total}")
-
     try:
-        result = add(
+        return add(
             temp_path,
             author=author.strip() or None,
-            title=title.strip() or Path(upload.name).stem,
+            title=title.strip() or None,
             tier=tier,
             chunk_size=size,
             overlap=overlap,
             progress=tick,
             notify=st.info,
         )
-    except NoTextLayerError as exc:
-        bar.empty()
-        st.error(str(exc))
-        return
-    except (ValueError, FileNotFoundError) as exc:
-        bar.empty()
-        st.error(str(exc))
-        return
+    except (NoTextLayerError, ValueError, FileNotFoundError) as exc:
+        st.error(f"{upload.name}: {exc}")
+        return None
     finally:
         temp_path.unlink(missing_ok=True)
         temp_dir.rmdir()
 
-    bar.empty()
-    meta = result.meta
-    if result.already_indexed:
-        st.info(f"**{meta.title}** is already indexed at the *{tier}* tier — nothing to do.")
-    else:
-        st.success(
-            f"Indexed **{meta.title}** — {meta.page_count} pages, "
-            f"{meta.chunk_count} chunks, *{tier}* tier."
-        )
-    if result.warning:
-        st.warning(result.warning)
+
+# Columns of the library table. Only author and title are editable; the rest
+# describe the index and are shown for orientation.
+LIBRARY_COLUMNS = ("Title", "Author", "Pages", "Tiers", "ID")
+
+
+def _library_rows(sources: list[SourceMeta]) -> list[dict[str, object]]:
+    return [
+        {
+            "Title": meta.title,
+            "Author": meta.author,
+            "Pages": meta.page_count,
+            "Tiers": ", ".join(meta.tiers),
+            "ID": meta.short_id,
+        }
+        for meta in sources
+    ]
+
+
+def _apply_table_edits(edited_rows: dict, source_ids: list[str]) -> list[SourceMeta]:
+    """Push the table's edited cells through `edit`, the same path as the CLI.
+
+    `edited_rows` is Streamlit's `{row_index: {column: value}}`; only the
+    author and title columns can change, so anything else is ignored.
+    """
+    updated = []
+    for row, changes in edited_rows.items():
+        author = changes.get("Author")
+        title = changes.get("Title")
+        if author is None and title is None:
+            continue
+        updated.append(edit(source_ids[int(row)], author=author, title=title))
+    return updated
+
+
+def _library_table(sources: list[SourceMeta]) -> None:
+    """The library as an editable table; edits are saved as they are made."""
+    source_ids = [meta.source_id for meta in sources]
+    st.session_state["library_source_ids"] = source_ids
+
+    def on_change() -> None:
+        state = st.session_state.get("library_table") or {}
+        _apply_table_edits(state.get("edited_rows", {}), st.session_state["library_source_ids"])
+
+    st.data_editor(
+        _library_rows(sources),
+        key="library_table",
+        on_change=on_change,
+        hide_index=True,
+        disabled=[c for c in LIBRARY_COLUMNS if c not in ("Title", "Author")],
+        column_config={
+            "Title": st.column_config.TextColumn(help="Used in citations. Click to edit."),
+            "Author": st.column_config.TextColumn(help="Used in citations. Click to edit."),
+        },
+    )
 
 
 def _upgrade_stale_sources(source: str | None) -> None:
@@ -191,17 +258,24 @@ def _sidebar() -> tuple[str, str | None]:
 
         st.divider()
         st.subheader("Add a PDF")
-        upload = st.file_uploader("Drag and drop a PDF", type=["pdf"], key="upload")
-        author = st.text_input("Author", placeholder="Seth Holmes", key="author")
-        title = st.text_input("Title", placeholder="Fresh Fruit, Broken Bodies", key="title")
+        uploads = st.file_uploader(
+            "Drag and drop PDFs", type=["pdf"], accept_multiple_files=True, key="upload"
+        )
+        if len(uploads) > 1:
+            author = title = ""
+            st.caption("Metadata comes from each PDF; correct it in the library table.")
+        else:
+            author = st.text_input("Author", placeholder="Seth Holmes", key="author")
+            title = st.text_input("Title", placeholder="Fresh Fruit, Broken Bodies", key="title")
         with st.expander("Chunking"):
             size = st.number_input("Sentences per chunk", 1, 10, DEFAULT_SIZE, key="chunk_size")
             overlap = st.number_input("Overlap", 0, 9, DEFAULT_OVERLAP, key="overlap")
-        if upload is not None and st.button("Index this PDF", type="primary", key="index"):
+        label = f"Index {len(uploads)} PDFs" if len(uploads) > 1 else "Index this PDF"
+        if uploads and st.button(label, type="primary", key="index"):
             if overlap >= size:
                 st.error("Overlap must be smaller than the chunk size.")
             else:
-                _index_upload(upload, author, title, tier, int(size), int(overlap))
+                _index_uploads(uploads, author, title, tier, int(size), int(overlap))
                 st.rerun()
 
         if sources:
@@ -233,6 +307,11 @@ def main() -> None:
     )
 
     tier, source = _sidebar()
+
+    sources = list_sources()
+    if sources:
+        with st.expander(f"Library — {len(sources)} source(s)", expanded=False):
+            _library_table(sources)
 
     query = st.text_area(
         "What are you looking for?",

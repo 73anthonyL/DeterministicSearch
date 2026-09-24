@@ -282,3 +282,33 @@ defended or reversed on purpose.
   so a mistyped `--tittle` is caught.
 - **`edit` keeps the source's position in `dsearch list`.** `save_meta`
   replaces the row in place; a rename should not look like a re-add.
+
+### Multi-PDF add
+
+- **Globs are expanded by dsearch as well as by the shell.** zsh expands
+  `samples/*.pdf` before the program sees it, but a quoted pattern, and every
+  Windows shell, hands it through verbatim. A pattern that matches nothing is
+  an error, not a silent no-op, because a typo in a path should be visible.
+- **One bad file does not stop the batch.** A scanned PDF among five is
+  reported on stderr and the other four are indexed; the exit code is 1 at the
+  end so a script can tell. Stopping at the first failure would make the user
+  re-run the command minus one file, which is exactly the tedium the batch is
+  meant to remove.
+- **`--author`/`--title` with several files is refused, not applied to all.**
+  Five chapters of one book would benefit from applying it to all, but five
+  different books would be silently mislabelled, and the refusal message names
+  `dsearch edit` as the fix.
+- **The Streamlit progress bar is one bar, not two.** Streamlit stacks widgets
+  vertically and a second bar during a five-book upload would push the page
+  around; the single bar's fraction is `(books done + this book's fraction) /
+  books`, with the "Book 2 of 5 — page 10 of 44" text carrying the detail.
+- **The library table is `st.data_editor` fed a list of dicts, not a
+  DataFrame,** so the app has no pandas import of its own. Edits arrive as
+  `{row: {column: value}}` in session state and are pushed through
+  `index.edit` — the same function `dsearch edit` calls — so the two front
+  ends cannot drift.
+- **The table sits in a collapsed expander above the query.** It is
+  reference material, not the task; results stay the first thing on screen.
+- **Author and title inputs disappear when more than one file is selected**,
+  rather than being disabled with a tooltip, because a disabled field that
+  still shows a typed value invites the belief that it will be applied.

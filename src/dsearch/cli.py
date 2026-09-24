@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import glob
 from pathlib import Path
 from typing import Annotated
 
@@ -26,6 +27,7 @@ from dsearch.extract import NoTextLayerError
 from dsearch.index import (
     DEFAULT_TIER,
     TIERS,
+    AddResult,
     AmbiguousSourceError,
     SourceNotFoundError,
     home,
@@ -164,56 +166,106 @@ def _upgrade_stale_sources(source: str | None) -> None:
         upgrade_stale(scoped, progress=tick, notify=_note)
 
 
+def _expand_paths(patterns: list[str]) -> list[Path]:
+    """Turn arguments into PDF paths, expanding globs the shell did not.
+
+    A quoted pattern (`dsearch add "samples/*.pdf"`) and Windows shells both
+    hand the glob through verbatim, so it is expanded here. A pattern that
+    matches nothing is reported as a missing file rather than silently dropped.
+    """
+    paths: list[Path] = []
+    for pattern in patterns:
+        if any(char in pattern for char in "*?["):
+            matches = sorted(Path(p) for p in glob.glob(pattern))
+            if not matches:
+                _fail(f"No files match {pattern!r}.")
+            paths.extend(matches)
+        else:
+            paths.append(Path(pattern))
+    return paths
+
+
+def _report_add(result: AddResult, tier: str) -> None:
+    """One line per file: what happened to it."""
+    meta = result.meta
+    if result.already_indexed:
+        console.print(
+            f"[yellow]Already indexed[/yellow] [bold]{meta.title}[/bold] "
+            f"({meta.short_id}) at tier [bold]{tier}[/bold] — skipped."
+        )
+        return
+    verb = "Rebuilt" if result.reindexed else "Indexed"
+    console.print(
+        f"[green]{verb}[/green] [bold]{meta.title}[/bold] ({meta.short_id}) — "
+        f"{meta.page_count} pages, {meta.chunk_count} chunks, tier [bold]{tier}[/bold]."
+    )
+
+
 @app.command()
 def add(
-    pdf: Annotated[Path, typer.Argument(help="Path to the PDF to index.")],
-    author: Annotated[str | None, typer.Option(help="Author, for citations.")] = None,
-    title: Annotated[str | None, typer.Option(help="Title, for citations.")] = None,
+    pdfs: Annotated[list[str], typer.Argument(help="PDF paths or glob patterns.")],
+    author: Annotated[
+        str | None, typer.Option(help="Author, for citations (single PDF only).")
+    ] = None,
+    title: Annotated[
+        str | None, typer.Option(help="Title, for citations (single PDF only).")
+    ] = None,
     tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
     chunk_size: Annotated[int, typer.Option(help="Sentences per chunk.")] = DEFAULT_SIZE,
     overlap: Annotated[
         int, typer.Option(help="Sentences shared between chunks.")
     ] = DEFAULT_OVERLAP,
 ) -> None:
-    """Index a PDF into your library."""
-    try:
-        with _page_progress() as progress:
-            task = progress.add_task(f"Embedding [bold]{pdf.name}[/bold]", total=None)
-
-            def tick(done: int, total: int) -> None:
-                progress.update(task, completed=done, total=total)
-
-            result = index_add(
-                pdf,
-                author=author,
-                title=title,
-                tier=tier,
-                chunk_size=chunk_size,
-                overlap=overlap,
-                progress=tick,
-                notify=_note,
-            )
-    except FileNotFoundError as exc:
-        _fail(str(exc))
-    except NoTextLayerError as exc:
-        _fail(str(exc))
-    except ValueError as exc:
-        _fail(str(exc))
-
-    meta = result.meta
-    if result.already_indexed:
-        console.print(
-            f"[yellow]Already indexed[/yellow] [bold]{meta.title}[/bold] "
-            f"({meta.short_id}) at tier [bold]{tier}[/bold] — nothing to do."
+    """Index one or more PDFs into your library."""
+    paths = _expand_paths(pdfs)
+    if len(paths) > 1 and (author or title):
+        _fail(
+            "--author and --title apply to a single PDF. With several files the metadata "
+            "comes from each PDF; set it afterwards with `dsearch edit <source> "
+            '--author "..." --title "..."`.'
         )
-        return
 
-    console.print(
-        f"[green]Indexed[/green] [bold]{meta.title}[/bold] ({meta.short_id}) — "
-        f"{meta.page_count} pages, {meta.chunk_count} chunks, tier [bold]{tier}[/bold]."
-    )
-    if result.warning:
-        console.print(f"[yellow]Note[/yellow] {result.warning}")
+    failures = 0
+    warning: str | None = None
+    with _page_progress() as progress:
+        overall = None
+        if len(paths) > 1:
+            overall = progress.add_task("Books", total=len(paths))
+        pages = progress.add_task("", total=None)
+
+        def tick(done: int, total: int) -> None:
+            progress.update(pages, completed=done, total=total)
+
+        for position, path in enumerate(paths, start=1):
+            if overall is not None:
+                progress.update(overall, completed=position - 1)
+                progress.update(
+                    overall,
+                    description=f"Book {position} of {len(paths)}: [bold]{path.name}[/bold]",
+                )
+            progress.reset(pages, total=None, description=f"Embedding [bold]{path.name}[/bold]")
+            try:
+                result = index_add(
+                    path,
+                    author=author,
+                    title=title,
+                    tier=tier,
+                    chunk_size=chunk_size,
+                    overlap=overlap,
+                    progress=tick,
+                    notify=_note,
+                )
+            except (FileNotFoundError, NoTextLayerError, ValueError) as exc:
+                failures += 1
+                errors.print(f"[bold red]Error[/bold red] {path}: {exc}")
+                continue
+            _report_add(result, tier)
+            warning = result.warning or warning
+
+    if warning:
+        _note(warning)
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @app.command("list")

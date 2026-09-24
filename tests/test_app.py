@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dsearch import app
 from dsearch.chunk import Chunk
-from dsearch.index import SourceMeta
+from dsearch.index import AddResult, SourceMeta
 from dsearch.search import Result
 
 SENTENCES = [
@@ -107,29 +107,105 @@ class TestUploadNaming:
 
         captured: dict[str, object] = {}
 
-        class FakeUpload:
-            name = "Chapter2.pdf"
-
-            def getbuffer(self):
-                return b"%PDF-1.4 fake"
-
         def fake_add(path, **kwargs):
             captured["name"] = path.name
             captured["exists"] = path.is_file()
             raise ValueError("stop here — naming is all this test checks")
 
         monkeypatch.setattr(app_module, "add", fake_add)
-        monkeypatch.setattr(app_module.st, "progress", lambda *a, **kw: _NullBar())
         monkeypatch.setattr(app_module.st, "error", lambda *a, **kw: None)
 
-        app_module._index_upload(FakeUpload(), "", "", "fast", 3, 1)
+        assert app_module._index_one(FakeUpload("Chapter2.pdf"), "", "", "fast", 3, 1, None) is None
         assert captured["name"] == "Chapter2.pdf"
         assert captured["exists"] is True
 
 
-class _NullBar:
-    def progress(self, *args, **kwargs):
-        pass
+class TestMultiUpload:
+    def test_indexes_each_upload_in_order_with_combined_progress(self, monkeypatch):
+        import dsearch.app as app_module
 
-    def empty(self):
-        pass
+        seen: list[str] = []
+        texts: list[str] = []
+
+        def fake_add(path, *, progress, **kwargs):
+            seen.append(path.name)
+            progress(2, 4)  # Halfway through this book.
+            meta = SourceMeta("id", path.name, path.stem, "", "2026-09-24", 4, chunk_count=9)
+            return AddResult(meta=meta, already_indexed=False, embedded_tier="fast")
+
+        class Bar:
+            def progress(self, fraction, text=""):
+                texts.append(f"{fraction:.3f} {text}")
+
+            def empty(self):
+                pass
+
+        monkeypatch.setattr(app_module, "add", fake_add)
+        monkeypatch.setattr(app_module.st, "progress", lambda *a, **kw: Bar())
+        monkeypatch.setattr(app_module.st, "success", lambda *a, **kw: None)
+        monkeypatch.setattr(app_module.st, "info", lambda *a, **kw: None)
+
+        uploads = [FakeUpload("a.pdf"), FakeUpload("b.pdf"), FakeUpload("c.pdf")]
+        app_module._index_uploads(uploads, "", "", "fast", 3, 1)
+
+        assert seen == ["a.pdf", "b.pdf", "c.pdf"]
+        # Book 2 of 3, half done, is 1.5/3 of the way overall.
+        assert "0.500 Book 2 of 3 — embedding page 2 of 4" in texts
+
+    def test_author_and_title_are_only_passed_for_a_single_upload(self, monkeypatch):
+        # The sidebar blanks them for several files; a single file still gets them.
+        import dsearch.app as app_module
+
+        kwargs_seen: list[dict] = []
+
+        def fake_add(path, **kwargs):
+            kwargs_seen.append(kwargs)
+            raise ValueError("stop")
+
+        monkeypatch.setattr(app_module, "add", fake_add)
+        monkeypatch.setattr(app_module.st, "error", lambda *a, **kw: None)
+        app_module._index_one(FakeUpload("a.pdf"), "Seth Holmes", "", "fast", 3, 1, None)
+        assert kwargs_seen[0]["author"] == "Seth Holmes"
+        assert kwargs_seen[0]["title"] is None  # Falls through to PDF metadata, then filename.
+
+
+class TestLibraryTable:
+    def _sources(self):
+        return [
+            SourceMeta("a" * 64, "a.pdf", "Chapter 4", "", "2026-09-24", 23, tiers=["fast"]),
+            SourceMeta("b" * 64, "b.pdf", "Chapter 5", "", "2026-09-24", 44, tiers=["fast"]),
+        ]
+
+    def test_rows_show_title_author_pages_and_tiers(self):
+        rows = app._library_rows(self._sources())
+        assert rows[1] == {
+            "Title": "Chapter 5",
+            "Author": "",
+            "Pages": 44,
+            "Tiers": "fast",
+            "ID": "bbbbbbbb",
+        }
+
+    def test_edits_go_through_the_same_edit_function_as_the_cli(self, monkeypatch):
+        import dsearch.app as app_module
+
+        calls: list[tuple] = []
+        monkeypatch.setattr(
+            app_module,
+            "edit",
+            lambda source_id, *, author, title: calls.append((source_id, author, title)),
+        )
+        ids = [m.source_id for m in self._sources()]
+        app_module._apply_table_edits(
+            {1: {"Author": "Seth Holmes", "Title": "Fresh Fruit, Broken Bodies"}, 0: {"Pages": 9}},
+            ids,
+        )
+        assert calls == [("b" * 64, "Seth Holmes", "Fresh Fruit, Broken Bodies")]
+
+
+class FakeUpload:
+    def __init__(self, name: str):
+        self.name = name
+
+    def getbuffer(self):
+        return b"%PDF-1.4 fake"
