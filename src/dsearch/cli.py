@@ -1,4 +1,4 @@
-"""The `dsearch` command line: add, list, remove, search."""
+"""The `dsearch` command line: add, list, remove, search, terms."""
 
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ from dsearch.index import (
     embed_source,
     format_duration,
     home,
+    is_stale,
     resolve_source,
     tier_gap,
     upgrade_stale,
@@ -54,6 +55,7 @@ from dsearch.index import (
 )
 from dsearch.search import DEFAULT_K, Result
 from dsearch.search import search as run_search
+from dsearch.terms import DEFAULT_TOP, BookTerms, key_terms
 
 # Context from a neighbouring chunk is trimmed to this many characters so a
 # `--k 20` search stays readable in one screenful.
@@ -449,6 +451,73 @@ def embed(
         return
     _describe_gap(gap, len(scoped))
     _embed_missing(gap)
+
+
+def _book_heading(book: BookTerms) -> str:
+    """Title and author, and how the terms under it were ranked."""
+    heading = f"[bold]{book.title}[/bold]"
+    if book.author:
+        heading += f" — {book.author}"
+    ranking = f"re-ranked at tier {book.tier}" if book.tier else "ranked by word counts"
+    return f"{heading}  [dim]({ranking})[/dim]"
+
+
+def _terms_table(book: BookTerms) -> Table:
+    """One row per term, grouped under its chapter, with the evidence columns."""
+    table = Table(box=None, pad_edge=False, header_style="bold")
+    table.add_column("Chapter", style="italic", max_width=36)
+    table.add_column("Term")
+    table.add_column("Count", justify="right")
+    table.add_column("Densest page", style="dim")
+    for number, chapter in enumerate(book.chapters):
+        if number:
+            table.add_row()  # A blank line between chapters.
+        if not chapter.terms:
+            table.add_row(chapter.label, "[dim]no distinctive terms[/dim]", "", "")
+        for position, term in enumerate(chapter.terms):
+            label = chapter.label if position == 0 else ""
+            table.add_row(label, term.text, str(term.count), term.page_label)
+    return table
+
+
+@app.command()
+def terms(
+    source: Annotated[str | None, typer.Option(help="Limit to one source's chapters.")] = None,
+    tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
+    top: Annotated[int, typer.Option(help="Terms to show per chapter.")] = DEFAULT_TOP,
+    no_rerank: Annotated[
+        bool,
+        typer.Option("--no-rerank", help="Rank by word counts only; instant, loads no model."),
+    ] = False,
+) -> None:
+    """Show the terms that set each chapter apart from the rest of its book."""
+    try:
+        for meta in _scoped_sources(source):
+            if is_stale(meta):
+                _note(
+                    f"{meta.title or meta.filename} ({meta.short_id}) was indexed by an older "
+                    "version; run `dsearch add` on its PDF again for cleaner terms."
+                )
+        with console.status("Ranking terms…"):
+            books = key_terms(source=source, tier=tier, top=top, rerank=not no_rerank)
+    except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+        _fail(str(exc))
+
+    if not books:
+        console.print("[dim]Your library is empty. Add a PDF with[/dim] dsearch add <file.pdf>")
+        return
+
+    for book in books:
+        console.print()
+        console.print(_book_heading(book))
+        if book.note:
+            _note(book.note)
+        if not book.contrasted:
+            _note(
+                "This book has a single chapter, so there is nothing to contrast it with: "
+                "terms are ranked by frequency."
+            )
+        console.print(_terms_table(book))
 
 
 def _version_callback(value: bool) -> None:
