@@ -11,6 +11,7 @@ from dsearch import app
 from dsearch.chunk import Chunk
 from dsearch.index import AddResult, SourceMeta
 from dsearch.search import Result
+from dsearch.terms import BookTerms, ChapterTerms, Term
 
 SENTENCES = [
     "The clinic dismissed his knee pain.",
@@ -264,3 +265,61 @@ class TestTierGapBox:
         text = app_module._tiers_summary(self._gap([]).missing)
         assert "**Chapter 4**: fast, best" in text
         assert "**Chapter 5**: fast, best" in text
+
+
+def make_book(tier: str | None = "fast") -> BookTerms:
+    def term(text: str, count: int, page: int) -> Term:
+        return Term(
+            text=text,
+            count=count,
+            score=1.0,
+            source_id="abc",
+            pdf_page=page,
+            printed_page=page + 40,
+        )
+
+    return BookTerms(
+        title="Fresh Fruit, Broken Bodies",
+        author="Seth Holmes",
+        tier=tier,
+        chapters=[
+            ChapterTerms(label="Farm", titled=True, terms=[term("pickers", 86, 29)]),
+            ChapterTerms(
+                label="Doctors",
+                titled=True,
+                terms=[term("physician", 87, 13), term("clinic", 83, 17)],
+            ),
+            ChapterTerms(label="Appendix", titled=True, terms=[]),
+        ],
+    )
+
+
+class TestTermsRows:
+    def test_one_row_per_term_in_chapter_order(self):
+        rows = app._terms_rows(make_book())
+        assert [(row["Chapter"], row["Term"]) for row in rows] == [
+            ("Farm", "pickers"),
+            ("Doctors", "physician"),
+            ("Doctors", "clinic"),
+        ]
+
+    def test_rows_carry_the_count_and_the_densest_page(self):
+        row = app._terms_rows(make_book())[0]
+        assert row["Count"] == 86
+        assert row["Densest page"] == "p. 69 (PDF 29)"
+
+    def test_a_book_with_no_chapters_has_no_rows(self):
+        assert app._terms_rows(BookTerms(title="Empty", author="")) == []
+
+
+class TestTermsHeading:
+    def test_names_the_tier_that_reranked(self):
+        heading = app._terms_heading(make_book(tier="balanced"))
+        assert "**Fresh Fruit, Broken Bodies** — Seth Holmes" in heading
+        assert "*balanced*" in heading
+
+    def test_says_when_the_ranking_is_lexical_only(self):
+        assert "ranked by word counts" in app._terms_heading(make_book(tier=None))
+
+    def test_omits_an_unknown_author(self):
+        assert "—" not in app._terms_heading(BookTerms(title="Untitled", author=""))
