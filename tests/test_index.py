@@ -7,6 +7,7 @@ model path is exercised in the end-to-end verification.
 from __future__ import annotations
 
 import json
+import zlib
 
 import numpy as np
 import pytest
@@ -43,7 +44,7 @@ def stub_embeddings(monkeypatch):
         out = np.zeros((len(texts), EMBED_DIM), dtype=np.float32)
         for row, text in enumerate(texts):
             for position, token in enumerate(text.lower().split()):
-                out[row, hash(token) % EMBED_DIM] += 1.0 / (position + 1)
+                out[row, zlib.crc32(token.encode()) % EMBED_DIM] += 1.0 / (position + 1)
         norms = np.linalg.norm(out, axis=1, keepdims=True)
         return out / np.maximum(norms, 1e-9)
 

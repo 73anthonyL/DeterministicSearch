@@ -5,6 +5,8 @@ Embedding is stubbed so these run offline and fast.
 
 from __future__ import annotations
 
+import zlib
+
 import numpy as np
 import pytest
 from typer.testing import CliRunner
@@ -27,7 +29,9 @@ def fake_embed(texts, tier=index.DEFAULT_TIER, *, pages=None, page_count=None, p
     out = np.zeros((len(texts), dim), dtype=np.float32)
     for row, text in enumerate(texts):
         for token in text.lower().split():
-            out[row, hash(token) % dim] += 1.0
+            # Not the built-in hash(): that is salted per process, which made
+            # the ranking, and so the asserted page, vary from run to run.
+            out[row, zlib.crc32(token.encode()) % dim] += 1.0
     if progress and page_count:
         progress(page_count, page_count)
     norms = np.linalg.norm(out, axis=1, keepdims=True)
