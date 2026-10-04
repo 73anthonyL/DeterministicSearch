@@ -37,12 +37,17 @@ from dsearch.index import (
     upgrade_stale,
 )
 from dsearch.search import DEFAULT_K, Result, search
+from dsearch.terms import DEFAULT_TOP, BookTerms, key_terms
 
 # Neighbouring-chunk context shown around a result, in characters.
 NEIGHBOUR_CHARS = 240
 
 # Bounds for the "search deeper" slider.
 MIN_K, MAX_K = 1, 20
+
+# Bounds for the "terms per chapter" slider. Past 25 the list reaches terms
+# that barely distinguish the chapter.
+MIN_TOP, MAX_TOP = 3, 25
 
 TIER_NOTES = {
     "fast": "all-MiniLM-L6-v2 — quickest, smallest download",
@@ -218,6 +223,71 @@ def _library_table(sources: list[SourceMeta]) -> None:
     )
 
 
+def _terms_rows(book: BookTerms) -> list[dict[str, object]]:
+    """One table row per term, mirroring the columns of `dsearch terms`."""
+    return [
+        {
+            "Chapter": chapter.label,
+            "Term": term.text,
+            "Count": term.count,
+            "Densest page": term.page_label,
+        }
+        for chapter in book.chapters
+        for term in chapter.terms
+    ]
+
+
+def _terms_heading(book: BookTerms) -> str:
+    """Title and author, and how the terms under it were ranked."""
+    heading = f"**{book.title}**"
+    if book.author:
+        heading += f" — {book.author}"
+    ranking = f"re-ranked at the *{book.tier}* tier" if book.tier else "ranked by word counts"
+    return f"{heading} · {ranking}"
+
+
+def _render_terms(book: BookTerms) -> None:
+    st.markdown(_terms_heading(book))
+    if book.note:
+        st.info(book.note)
+    if not book.contrasted:
+        st.info(
+            "This book has a single chapter, so there is nothing to contrast it with: "
+            "terms are ranked by frequency."
+        )
+    st.dataframe(_terms_rows(book), hide_index=True)
+
+
+def _key_terms_section(tier: str) -> None:
+    """The terms that set each chapter apart, for every book in the library.
+
+    Computed on a button press, not on every rerun, because the re-rank loads
+    the embedding model. The result is kept in session state with the tier
+    that produced it, so changing the tier does not show a stale ranking.
+
+    The sidebar's source filter is not applied here: a chapter's terms only
+    mean something beside the other chapters of its book.
+    """
+    shown = st.session_state.get("terms")
+    with st.expander("Key terms by chapter", expanded=bool(shown)):
+        st.caption(
+            "The words and phrases each chapter uses far more than the rest of its book. "
+            "Every term is counted from the source, with the page where it is densest."
+        )
+        top = st.slider("Terms per chapter", MIN_TOP, MAX_TOP, DEFAULT_TOP, key="terms_top")
+        if st.button("Show key terms", key="show_terms"):
+            try:
+                with st.spinner("Ranking terms…"):
+                    shown = {"tier": tier, "books": key_terms(tier=tier, top=top)}
+            except (SourceNotFoundError, ValueError) as exc:
+                st.error(str(exc))
+                return
+            st.session_state["terms"] = shown
+        if shown and shown["tier"] == tier:
+            for book in shown["books"]:
+                _render_terms(book)
+
+
 def _upgrade_stale_sources(source: str | None) -> None:
     """Rebuild any in-scope source indexed by an older pipeline, with a page bar."""
     scoped = [resolve_source(source)] if source else list_sources()
@@ -375,6 +445,7 @@ def main() -> None:
     if sources:
         with st.expander(f"Library — {len(sources)} source(s)", expanded=False):
             _library_table(sources)
+        _key_terms_section(tier)
 
     query = st.text_area(
         "What are you looking for?",

@@ -5,6 +5,8 @@ Embedding is stubbed so these run offline and fast.
 
 from __future__ import annotations
 
+import zlib
+
 import numpy as np
 import pytest
 from typer.testing import CliRunner
@@ -27,7 +29,9 @@ def fake_embed(texts, tier=index.DEFAULT_TIER, *, pages=None, page_count=None, p
     out = np.zeros((len(texts), dim), dtype=np.float32)
     for row, text in enumerate(texts):
         for token in text.lower().split():
-            out[row, hash(token) % dim] += 1.0
+            # Not the built-in hash(): that is salted per process, which made
+            # the ranking, and so the asserted page, vary from run to run.
+            out[row, zlib.crc32(token.encode()) % dim] += 1.0
     if progress and page_count:
         progress(page_count, page_count)
     norms = np.linalg.norm(out, axis=1, keepdims=True)
@@ -65,7 +69,7 @@ class TestHelpAndVersion:
     def test_help_lists_every_command(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        for command in ("add", "edit", "list", "remove", "search"):
+        for command in ("add", "edit", "list", "remove", "search", "terms"):
             assert command in result.output
 
     def test_version(self):
@@ -376,3 +380,103 @@ class TestEmbedCommand:
         runner.invoke(app, ["embed", "--tier", "best"])
         out = runner.invoke(app, ["list"]).output
         assert "fast, best" in out
+
+
+FARM_BODY = (
+    "The crew boss watched the pickers. "
+    "Pickers filled each strawberry flat. "
+    "The crew boss weighed the strawberry flat. "
+    "Workers rested at noon."
+)
+CLINIC_BODY = (
+    "The physician examined the patient. "
+    "A patient waited at the clinic. "
+    "The physician left the clinic early. "
+    "Workers rested at noon."
+)
+
+
+class TestTerms:
+    @pytest.fixture
+    def chapters(self, pdf_factory):
+        """One book added as two single-chapter PDFs."""
+        for name, body in (("farm.pdf", FARM_BODY), ("clinic.pdf", CLINIC_BODY)):
+            path = pdf_factory(name=name, pages=[body] * 3, folios=["46", "47", "48"])
+            result = runner.invoke(
+                app, ["add", str(path), "--author", "Seth Holmes", "--title", "Fresh Fruit"]
+            )
+            assert result.exit_code == 0, result.output
+
+    def test_lists_terms_under_each_chapter(self, chapters):
+        result = runner.invoke(app, ["terms"])
+        assert result.exit_code == 0, result.output
+        assert "Fresh Fruit" in result.output
+        assert "Seth Holmes" in result.output
+        assert result.output.index("farm.pdf") < result.output.index("pickers")
+        assert result.output.index("clinic.pdf") < result.output.index("physician")
+
+    def test_shows_the_count_and_the_densest_page(self, chapters):
+        result = runner.invoke(app, ["terms", "--source", "clinic.pdf"])
+        row = next(line for line in result.output.splitlines() if "physician" in line)
+        assert "6" in row
+        assert "p. 46 (PDF 1)" in row
+
+    def test_leaves_out_terms_shared_by_every_chapter(self, chapters):
+        assert "Workers" not in runner.invoke(app, ["terms"]).output
+
+    def test_says_which_tier_reranked(self, chapters):
+        assert "re-ranked at tier fast" in runner.invoke(app, ["terms"]).output
+
+    def test_source_limits_the_chapters_shown(self, chapters):
+        result = runner.invoke(app, ["terms", "--source", "clinic.pdf"])
+        assert result.exit_code == 0
+        assert "physician" in result.output
+        assert "pickers" not in result.output
+
+    def test_top_limits_terms_per_chapter(self, chapters):
+        result = runner.invoke(app, ["terms", "--source", "clinic.pdf", "--top", "1"])
+        assert result.output.count("(PDF ") == 1
+
+    def test_no_rerank_embeds_nothing(self, chapters, monkeypatch):
+        def explode(*args, **kwargs):
+            raise AssertionError("--no-rerank must not embed anything")
+
+        monkeypatch.setattr(index, "embed_texts", explode)
+        result = runner.invoke(app, ["terms", "--no-rerank"])
+        assert result.exit_code == 0, result.output
+        assert "ranked by word counts" in result.output
+
+    def test_a_missing_tier_is_noted_not_embedded(self, chapters, monkeypatch):
+        def explode(*args, **kwargs):
+            raise AssertionError("a missing tier must not start an embedding run")
+
+        monkeypatch.setattr(index, "embed_texts", explode)
+        result = runner.invoke(app, ["terms", "--tier", "balanced"])
+        assert result.exit_code == 0, result.output
+        assert "dsearch embed --tier balanced" in result.output
+        assert "physician" in result.output
+
+    def test_a_single_chapter_book_says_it_is_ranked_by_frequency(self, added):
+        result = runner.invoke(app, ["terms"])
+        assert result.exit_code == 0, result.output
+        assert "single chapter" in result.output
+
+    def test_empty_library(self):
+        result = runner.invoke(app, ["terms"])
+        assert result.exit_code == 0
+        assert "empty" in result.output
+
+    def test_unknown_source_is_a_clean_error(self, chapters):
+        result = runner.invoke(app, ["terms", "--source", "nope"])
+        assert result.exit_code == 1
+        assert "Traceback" not in result.output
+
+    def test_unknown_tier_is_a_clean_error(self, chapters):
+        result = runner.invoke(app, ["terms", "--tier", "turbo"])
+        assert result.exit_code == 1
+        assert "Unknown tier" in result.output
+
+    def test_non_positive_top_is_a_clean_error(self, chapters):
+        result = runner.invoke(app, ["terms", "--top", "0"])
+        assert result.exit_code == 1
+        assert "top must be at least 1" in result.output

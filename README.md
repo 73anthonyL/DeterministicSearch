@@ -221,6 +221,65 @@ Embedded Fresh Fruit, Broken Bodies (eb815263) at tier balanced.
 
 `--source` limits it (repeatable).
 
+### `terms` — what each chapter is about
+
+The words and phrases a chapter uses far more than the rest of its book, each
+with how often it occurs and the page where it is densest — a place to start
+reading, or a query to hand to `search`:
+
+```
+$ dsearch terms --top 4
+
+Fresh Fruit, Broken Bodies — Seth Holmes  (re-ranked at tier fast)
+Chapter                             Term                   Count  Densest page
+ONE Introduction                    coyote                    29  p. 14 (PDF 14)
+                                    border                    75  p. 9 (PDF 9)
+                                    Border Patrol             20  p. 22 (PDF 22)
+                                    bus                       29  p. 2 (PDF 2)
+
+TWO “We Are Field Workers”          embodied anthropology      5  p. 30 (PDF 1)
+                                    body                      31  p. 34 (PDF 5)
+                                    social                    28  p. 31 (PDF 2)
+                                    experiences               21  p. 34 (PDF 5)
+
+THREE Segregation on the Farm       farm                     145  p. 66 (PDF 22)
+                                    pickers                   86  p. 73 (PDF 29)
+                                    berries                   63  p. 69 (PDF 25)
+                                    strawberry                39  p. 59 (PDF 15)
+
+FOUR “How the Poor Suffer”          violence                  56  p. 109 (PDF 22)
+                                    headaches                 20  p. 98 (PDF 11)
+                                    pain                      30  p. 93 (PDF 6)
+                                    suffering                 24  p. 95 (PDF 8)
+
+FIVE “Doctors Don’t Know Anything”  patients                 114  p. 115 (PDF 5)
+                                    physician                 87  p. 123 (PDF 13)
+                                    medical                   67  p. 116 (PDF 6)
+                                    clinicians                34  p. 141 (PDF 31)
+```
+
+Sources that share a title and author are treated as one book, so a book added
+as one PDF per chapter is compared chapter against chapter. If a chapter lands
+in a book of its own, its title or author differs from its siblings';
+`dsearch edit` fixes that.
+
+| Option | Effect |
+|---|---|
+| `--top 10` | Terms per chapter. |
+| `--source <id>` | Show only that source's chapters. They are still compared with the rest of the book. |
+| `--tier fast` | Which stored vectors re-rank the terms. A tier the book lacks is never embedded for this; the terms are ranked by word counts and a note says so. |
+| `--no-rerank` | Rank by word counts only. Instant, and loads no model. |
+
+```
+$ dsearch terms --source Chapter5.pdf --top 3 --no-rerank
+
+Fresh Fruit, Broken Bodies — Seth Holmes  (ranked by word counts)
+Chapter                             Term       Count  Densest page
+FIVE “Doctors Don’t Know Anything”  patients     114  p. 115 (PDF 5)
+                                    physician     87  p. 123 (PDF 13)
+                                    clinic        83  p. 127 (PDF 17)
+```
+
 ### `remove` — drop a source
 
 ```
@@ -246,8 +305,9 @@ the query box lets you edit author and title in place (the same code path as
 "Embed now" button rather than starting a long job silently; the sidebar lists
 which tiers each source already has. The query box takes paragraphs. Each
 result is the same card you get in the terminal, with a one-click copyable
-citation block. It calls exactly the same functions the CLI does, so the two
-can never disagree about ranking.
+citation block. "Key terms by chapter", above the query box, shows the same
+table as `dsearch terms` for every book in the library. The app calls exactly
+the same functions the CLI does, so the two can never disagree about ranking.
 
 ---
 
@@ -284,6 +344,15 @@ can never disagree about ranking.
 5. **Cite** (`cite.py`) — an MLA reference and an in-text parenthetical, built
    only from what is actually known. Missing elements are dropped, never invented.
 
+6. **Terms** (`terms.py`) — reads the stored chunks and vectors; nothing is
+   re-indexed. Words and two-word phrases are counted from each sentence once
+   (chunks overlap, so counting chunk text would count shared sentences twice).
+   A candidate is scored by its rate in the chapter weighted by how many times
+   higher that is than its rate in the rest of the book. The best 50 are then
+   embedded and ordered by similarity to the direction from the book's average
+   vector to the chapter's, and the two orderings are fused by reciprocal rank,
+   as in search. A term is always a span of the source, never a generated label.
+
 ### Quality tiers
 
 | Tier | Model | Trade-off |
@@ -311,7 +380,7 @@ rebuilds it.
 
 ```bash
 pip install -e ".[dev]"
-pytest          # 335 tests, no network required
+pytest          # 427 tests, no network required
 ruff check .
 ```
 
@@ -322,14 +391,14 @@ it runs offline in a couple of seconds.
 
 ## Roadmap
 
-- **Per-chapter key-term extraction** — surface the terms that distinguish each
-  chapter, reading the stored chunk metadata directly.
+- ~~**Per-chapter key-term extraction**~~ — shipped as `dsearch terms`.
 - **A 2D embedding map** — project the stored chunk vectors down to two
   dimensions and colour them by chapter, to see how a book's arguments cluster.
+  Each cluster can be labelled with its chapter's key terms.
 
-Both read the existing `chunks.jsonl` and `vectors_<tier>.npy`; the `Chunk`
+The map reads the existing `chunks.jsonl` and `vectors_<tier>.npy`; the `Chunk`
 schema carries `chapter` and a `chunk_id` that doubles as the vector row index
-specifically so neither feature needs a re-index.
+specifically so it needs no re-index, as key terms did not.
 
 ---
 

@@ -345,3 +345,109 @@ defended or reversed on purpose.
 - **`--source` on `embed` is repeatable** (`--source a --source b`) rather than
   comma-separated, which is Typer's convention and copes with titles that
   contain commas.
+
+## Key terms
+
+Decided with the author before building: key terms before the embedding map;
+lexical candidates re-ranked by embeddings; chapters compared within sources
+that share a title and author; each term shown with its count and densest
+page. What follows is what that left open.
+
+### Scoring
+
+- **The lexical score is not textbook TF-IDF.** That was the plan and the first
+  thing tried. With five chapters nearly every word occurs in all of them, so
+  IDF is close to constant and the ranking collapses to frequency: "people",
+  "work", and "Triqui" led every chapter. The score used is the term's rate in
+  the chapter times the log of the ratio to its rate in the rest of the book
+  (the term's contribution to the KL divergence between the two). On the
+  sample book it puts "checkers", "crew", and "berries" at the top of chapter
+  3. A term no more frequent than elsewhere scores zero and is never shown.
+- **The re-rank compares candidates with the chapter's centroid *minus the
+  book's*, not the centroid itself.** Chapters of one book share most of their
+  meaning, so similarity to the plain centroid measured how typical a term is
+  of the book and promoted "migrant" and "immigrants" everywhere. The
+  difference vector points at what is particular to the chapter. A one-chapter
+  book has no difference to take and uses the plain centroid.
+- **The two rankings are fused by reciprocal rank**, with the function search
+  already uses (`_rrf`, made public as `rrf`). A weighted sum would need a
+  weight, and a weight needs a justification.
+- **A term must occur 3 times in a chapter to be a candidate**, and the best 50
+  candidates go to the re-rank. Below 3, one sentence can make a word look
+  maximally distinctive.
+- **A one-chapter book is ranked by frequency, and the output says so.** With
+  nothing to contrast against there is no distinctiveness to measure; silence
+  would imply there was.
+
+### Counting
+
+- **Words are counted from each sentence once.** Chunks overlap by
+  `meta.overlap` sentences within a page, so the repeated leading sentences of
+  every chunk after the first on a page are skipped. Counting `chunk.text`
+  would inflate any term in a shared sentence.
+- **Phrases are two words and never cross punctuation.** Sentences are split
+  at commas, dashes, quotes, and brackets before pairing words, so "workers,
+  farm" is not a phrase. Three-word phrases were left out: in the sample book
+  they were nearly all a two-word phrase plus a neighbour.
+- **Regular plurals are counted with their singular** when the book uses both
+  ("patient"/"patients", "berry"/"berries"). Nothing else is stemmed; a
+  stemmer would also merge words that are not the same. Known limitation:
+  "-es" plurals ("bosses") and irregular ones are not folded.
+- **A term is shown in its most common spelling in the book,** so "Macario"
+  and "Border Patrol" keep their capitals. Phrases are tallied as written
+  rather than word by word, which would have printed "border Patrol".
+- **Stopwords are a built-in list of about 170 words.** It only has to keep
+  function words out of the candidates; the scoring already demotes words
+  common to every chapter. No dependency was added.
+
+### Pruning
+
+- **A word is dropped for a phrase when 60% of its occurrences are inside that
+  phrase** ("Miguel" for "San Miguel"), or when a phrase ranked above it
+  contains it. "border" survives beside "Border Patrol" because most of its
+  uses are on its own.
+- **One word appears in at most two of a chapter's terms.** Without the cap,
+  chapter 2 listed "embodied", "embodied anthropology", and "embodied
+  experiences".
+
+### Grouping and scope
+
+- **Book matching is exact apart from case and surrounding space.** A typo in
+  one source's title splits it into its own book. Fuzzy matching could merge
+  two editions by mistake; `dsearch edit` is the fix, and the README says so.
+- **Pages with no chapter title are grouped by source, under the filename.**
+  Pooling every untitled page in a book would merge unrelated front matter.
+- **`--source` narrows what is shown, not what is compared.** The rest of the
+  book is still read, because a chapter's terms are only distinctive relative
+  to its siblings.
+- **`terms` never embeds.** A book missing the requested tier is ranked
+  lexically with a note naming `dsearch embed`. Search asks before embedding
+  because it cannot answer without vectors; terms can, so it does not ask.
+- **`terms` does not rebuild a stale index either**, unlike `search` and
+  `embed`: a rebuild re-embeds. It prints a note naming the source instead.
+- **Nothing is cached.** Counting the sample library takes 0.2 s. The re-rank
+  takes longer, almost all of it loading the model, which a cache of terms
+  would not avoid on the first run and `--no-rerank` avoids on every run.
+- **`Term.score` is the reciprocal of the final rank**, so scores from
+  lexical-only and re-ranked runs are on the same scale.
+
+### Front ends
+
+- **The CLI prints one table per book with the chapter named on its first
+  row,** rather than a panel per chapter, so five chapters fit on one screen.
+- **In Streamlit the terms are computed on a button press** and kept in
+  session state with the tier that produced them. Computing on every rerun
+  would load the model each time a slider moved; keeping the tier means
+  switching tiers hides a ranking that no longer matches.
+- **The Streamlit section ignores the sidebar's source filter** and shows every
+  book. The filter passes a *title*, which is ambiguous for a book split over
+  several PDFs.
+
+### Tests
+
+- **The stub embedders in the CLI and index tests hash tokens with
+  `zlib.crc32`, not `hash()`.** The built-in is salted per process, so about
+  one run in thirty ranked a different page first and
+  `TestEdit::test_updates_the_citation` failed. Found while running the suite
+  for this feature; fixed in its own commit.
+

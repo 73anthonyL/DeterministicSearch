@@ -180,7 +180,7 @@ def _rank(scores: np.ndarray, pool: int, *, positive_only: bool) -> list[int]:
     return [int(i) for i in order]
 
 
-def _rrf(rankings: list[list[int]]) -> dict[int, float]:
+def rrf(rankings: list[list[int]]) -> dict[int, float]:
     """Fuse ranked candidate lists by reciprocal rank.
 
     RRF combines rankings rather than raw scores, which matters because a cosine
@@ -229,7 +229,7 @@ def search(
     query_vectors = _query_matrix(query, tier)
     dense = _dense_scores(query_vectors, corpus.vectors)
     keyword = _bm25_scores(query, corpus)
-    fused = _rrf(
+    fused = rrf(
         [
             _rank(dense, CANDIDATE_POOL, positive_only=False),
             _rank(keyword, CANDIDATE_POOL, positive_only=True),
