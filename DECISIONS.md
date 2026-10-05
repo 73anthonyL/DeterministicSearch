@@ -451,3 +451,14 @@ page. What follows is what that left open.
   `TestEdit::test_updates_the_citation` failed. Found while running the suite
   for this feature; fixed in its own commit.
 
+
+## Continuous integration
+
+- **One GitHub Actions job: `ruff check`, `ruff format --check`, `pytest`**, on
+  pushes to `main` and on every pull request. The suite stubs the embedder and
+  generates its own PDFs, so the job downloads no models and needs no secrets.
+- **CI runs Python 3.11, the supported floor.** The development venv is 3.12,
+  so the floor is the version nothing else exercises.
+- **CPU-only `torch` is installed before the package.** On Linux the default
+  wheel bundles CUDA libraries the tests never use; the CPU index keeps the
+  install small.
