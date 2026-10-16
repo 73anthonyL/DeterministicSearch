@@ -29,9 +29,11 @@ class TestLevel:
 
 class TestConfigure:
     def test_installs_one_handler_even_when_called_twice(self):
+        from io import StringIO
+
         logger = logging.getLogger("dsearch")
-        log.configure("DEBUG", console=Console(file=open("/dev/null", "w"), force_terminal=False))  # noqa: SIM115
-        log.configure("DEBUG", console=Console(file=open("/dev/null", "w"), force_terminal=False))  # noqa: SIM115
+        log.configure("DEBUG", console=Console(file=StringIO(), force_terminal=False))
+        log.configure("DEBUG", console=Console(file=StringIO(), force_terminal=False))
         ours = [h for h in logger.handlers if getattr(h, "_dsearch_handler", False)]
         assert len(ours) == 1
         assert logger.level == logging.DEBUG
