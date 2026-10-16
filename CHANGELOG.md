@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `dsearch demo` indexes a bundled public-domain sample (the Forethought and
+  first three chapters of Du Bois, *The Souls of Black Folk*, typeset with
+  front matter, an outline, running heads, folios, and hyphenation) and runs
+  one search, so a fresh install has something to try in two minutes.
 - `dsearch doctor` prints versions, the library path and size, the model
   cache and which tiers are downloaded, the compute device, and whether the
   web UI is installed; `--json` for bug reports.
@@ -43,6 +47,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A running head that changes with each chapter (so it repeats on only a few
+  pages of a whole book) is now recognised when it opens or closes at least
+  three pages, and no longer leaks into quoted passages.
+- Progress bars and advisories from the Hugging Face and torch libraries no
+  longer print during a model load unless you have configured them yourself.
 - A model that cannot be downloaded (no network, or `HF_HUB_OFFLINE` set
   before the first run) is reported in one line naming the cause and the
   cache location, instead of a traceback.

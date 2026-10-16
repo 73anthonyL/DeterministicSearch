@@ -36,6 +36,68 @@ uv run dsearch --help         # or: source .venv/bin/activate
 The first `dsearch add` downloads the embedding model (about 90 MB for the
 default `fast` tier); everything after that is offline.
 
+## Try it in two minutes
+
+A public-domain book ships inside the package: the Forethought and first three
+chapters of W. E. B. Du Bois, *The Souls of Black Folk* (1903), typeset with
+front matter, an outline, running heads, and printed page numbers like a real
+book. `dsearch demo` indexes it and runs one search:
+
+```
+$ dsearch demo
+
+Sample: dsearch-demo/sample.pdf (The Souls of Black Folk, Du Bois, W. E. B.)
+The first run downloads the embedding model (about 90 MB).
+
+Indexed The Souls of Black Folk (c9dfcfb6) — 31 pages, 259 chunks, tier fast.
+
+Searching for: "What does it feel like to be seen as a problem?"
+
+╭─ 1. The Souls of Black Folk  ·  I. Of Our Spiritual Strivings  ·  p. 1 (PDF 4) ──────────────────╮
+│                                                                                                  │
+│  All, nevertheless, flutter round it. They approach me in a half-hesitant sort of way, eye me    │
+│  curiously or compassionately, and then, instead of saying directly, How does it feel t…         │
+│  At these I smile, or am interested, or reduce the boiling to a simmer, as the occasion may      │
+│  require. To the real question, How does it feel to be a problem? I answer seldom a word.        │
+│  I answer seldom a word. And yet, being a problem is a strange experience,—peculiar even for     │
+│  one who has never been anything else, save perhaps in babyhood and in Europe. It is in…         │
+│                                                                                                  │
+│  Du Bois, W. E. B. *The Souls of Black Folk*. p. 1.                                              │
+│  “To the real question, How does it feel to be a problem?” (Du Bois 1).                          │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+…
+Next: ask your own question with dsearch search "...", add a book with dsearch add your.pdf
+--author ... --title ..., or open the web UI with dsearch ui.
+```
+
+Then ask it something of your own:
+
+```
+$ dsearch search "Booker T. Washington's programme of industrial education" -k 1
+
+╭─ 1. The Souls of Black Folk  ·  III. Of Mr. Booker T. Washington and Others  ·  p. 20 (PDF 23) ──╮
+│                                                                                                  │
+│  Easily the most striking thing in the history of the American Negro since 1876 is the           │
+│  ascendancy of Mr. Booker T. Washington. It began at the time when war memories and ideals wer…  │
+│  Mr. Washington came, with a simple definite programme, at the psychological moment when the     │
+│  nation was a little ashamed of having bestowed so much sentiment on Negroes, and was            │
+│  concentrating its energies on Dollars. His programme of industrial education, conciliation of   │
+│  the South, and submission and silence as to civil and political rights, was not wholly          │
+│  original; …                                                                                     │
+│                                                                                                  │
+│  Du Bois, W. E. B. *The Souls of Black Folk*. p. 20.                                             │
+│  “Mr. Washington came, with a simple definite programme, at the psychological moment when the    │
+│  nation was a little ashamed of having bestowed so much sentiment on Negroes, and was            │
+│  concentrating its energies on Dollars” (Du Bois 20).                                            │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
+
+The page numbers are the ones printed on the page (`p. 20`), not the PDF's
+own count (`PDF 23`); the front matter has roman numerals and is cited by PDF
+page. The provenance of the sample is in `src/dsearch/data/README.md`.
+
 Installing with plain `pip` on Linux pulls the default `torch` wheel, which
 bundles CUDA libraries this tool never uses. To keep it small:
 

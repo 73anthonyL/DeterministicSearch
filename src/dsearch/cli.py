@@ -63,6 +63,7 @@ from dsearch.index import (
 from dsearch.index import (
     remove as index_remove,
 )
+from dsearch.sample import SAMPLE_AUTHOR, SAMPLE_QUERY, SAMPLE_TITLE, copy_sample
 from dsearch.search import DEFAULT_K, Result, load_corpus
 from dsearch.search import search as run_search
 from dsearch.terms import DEFAULT_TOP, BookTerms, key_terms
@@ -640,6 +641,54 @@ def doctor(
         _emit_json(info)
     else:
         _doctor_report(info)
+
+
+@app.command()
+def demo(
+    directory: Annotated[
+        Path,
+        typer.Option("--dir", help="Where to put the sample PDF.", show_default="./dsearch-demo"),
+    ] = Path("dsearch-demo"),
+    tier: Annotated[Tier, typer.Option(help=_TIER_HELP)] = Tier.fast,
+) -> None:
+    """Index the bundled public-domain sample and run one search, to see how it works."""
+    path = copy_sample(directory)
+    console.print(f"Sample: [bold]{escape(str(path))}[/bold] ({SAMPLE_TITLE}, {SAMPLE_AUTHOR})")
+    console.print("[dim]The first run downloads the embedding model (about 90 MB).[/dim]")
+    with _page_progress() as progress:
+        task = progress.add_task(f"Embedding [bold]{path.name}[/bold]", total=None)
+
+        def tick(done: int, total: int) -> None:
+            progress.update(task, completed=done, total=total)
+
+        try:
+            result = index_add(
+                path,
+                author=SAMPLE_AUTHOR,
+                title=SAMPLE_TITLE,
+                tier=tier.value,
+                progress=tick,
+                notify=_note,
+            )
+        except (NoTextLayerError, ValueError, ModelUnavailableError) as exc:
+            _fail(str(exc))
+    _report_add(result, tier.value)
+
+    console.print()
+    console.print(f'Searching for: [bold]"{SAMPLE_QUERY}"[/bold]')
+    console.print()
+    try:
+        corpus = load_corpus(tier.value, result.meta.source_id)
+        results = run_search(SAMPLE_QUERY, k=2, tier=tier.value, corpus=corpus)
+    except ModelUnavailableError as exc:
+        _fail(str(exc))
+    for position, hit in enumerate(results, start=1):
+        console.print(_panel(hit, position))
+    console.print(
+        'Next: ask your own question with [bold]dsearch search "..."[/bold], add a book with '
+        "[bold]dsearch add your.pdf --author ... --title ...[/bold], or open the web UI with "
+        "[bold]dsearch ui[/bold]."
+    )
 
 
 @app.command()

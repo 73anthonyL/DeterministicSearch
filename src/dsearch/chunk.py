@@ -35,6 +35,13 @@ MAX_RUNNING_HEAD_CHARS = 60
 # trustworthy. Below it, coincidence is as likely as a real running head.
 MIN_PAGES_FOR_RUNNING_HEAD = 4
 
+# A second, position-based test: a short line that is among the first or last
+# lines of its page on at least this many pages is furniture even when it is on
+# far fewer than 30% of them. A whole book's recto head changes with every
+# chapter, so each variant repeats on only a chapter's worth of pages.
+BAND_LINES = 2
+MIN_BAND_REPEATS = 3
+
 # Words that end in a period without ending a sentence.
 _ABBREVIATIONS = frozenset(
     [
@@ -151,15 +158,20 @@ def _running_heads(pages: list[Page]) -> set[str]:
     if len(pages) < MIN_PAGES_FOR_RUNNING_HEAD:
         return set()
     counts: Counter[str] = Counter()
+    band_counts: Counter[str] = Counter()
     for page in pages:
-        lines = {
+        lines = [
             line.strip()
             for line in page.text.splitlines()
             if line.strip() and len(line.strip()) <= MAX_RUNNING_HEAD_CHARS
-        }
-        counts.update(lines)
+        ]
+        counts.update(set(lines))
+        edges = [line for line in lines[:BAND_LINES] + lines[-BAND_LINES:] if not line.isdigit()]
+        band_counts.update(set(edges))
     threshold = len(pages) * RUNNING_HEAD_RATIO
-    return {line for line, count in counts.items() if count >= threshold}
+    everywhere = {line for line, count in counts.items() if count >= threshold}
+    at_the_edges = {line for line, count in band_counts.items() if count >= MIN_BAND_REPEATS}
+    return everywhere | at_the_edges
 
 
 def _clean_page_text(text: str, running_heads: set[str]) -> str:

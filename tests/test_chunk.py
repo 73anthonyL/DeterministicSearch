@@ -128,6 +128,36 @@ class TestRunningHeads:
         pages = make_pages(("introduction\nBody.",), ("introduction\nBody.",))
         assert _running_heads(pages) == set()
 
+    def test_a_chapter_head_on_a_few_page_edges_is_furniture(self):
+        # A whole book's recto head changes with every chapter, so each one is
+        # on far fewer than 30% of pages; being the first line of three pages is
+        # evidence enough.
+        pages = (
+            [
+                Page(pdf_page=n, text=f"I. OF OUR STRIVINGS\n{n}\nBody text {n} goes here.")
+                for n in range(1, 4)
+            ]
+            + [
+                Page(pdf_page=n, text=f"II. OF FREEDOM\n{n}\nMore body text {n} here.")
+                for n in range(4, 7)
+            ]
+            + [
+                Page(pdf_page=n, text=f"Plain page {n} with nothing repeated.")
+                for n in range(7, 12)
+            ]
+        )
+        heads = _running_heads(pages)
+        assert heads == {"I. OF OUR STRIVINGS", "II. OF FREEDOM"}
+
+    def test_a_line_repeated_mid_page_on_a_few_pages_is_not_furniture(self):
+        # Three repeats is enough only at a page's edges; in the middle of the
+        # page, and under the 30% share, a repeated line is prose (a refrain).
+        pages = [
+            Page(pdf_page=n, text=f"Opening {n}.\nSecond {n}.\nThe refrain.\nFourth {n}.\nEnd {n}.")
+            for n in range(1, 4)
+        ] + [Page(pdf_page=n, text=f"Plain page {n} with nothing repeated.") for n in range(4, 12)]
+        assert "The refrain." not in _running_heads(pages)
+
 
 class TestCleanPageText:
     def test_strips_folio_and_running_head(self):

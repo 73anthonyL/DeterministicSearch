@@ -129,5 +129,6 @@ show_missing = true
 skip_covered = true
 
 [tool.codespell]
-skip = "uv.lock,*.pdf,./samples,./.venv,./.git,./dist"
+# The sample text is a verbatim 1903 source; its archaic spellings stay as printed.
+skip = "uv.lock,*.pdf,./samples,./.venv,./.git,./dist,*/data/*.txt"
 ignore-words-list = "triqui,oaxaca,checkers"

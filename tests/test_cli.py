@@ -72,7 +72,7 @@ class TestHelpAndVersion:
     def test_help_lists_every_command(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        for command in ("add", "edit", "list", "remove", "search", "terms", "ui"):
+        for command in ("add", "edit", "list", "remove", "search", "terms", "doctor", "demo", "ui"):
             assert command in result.output
 
     def test_version(self):
@@ -457,6 +457,25 @@ class TestModelUnavailable:
         monkeypatch.setenv("HF_HUB_OFFLINE", "1")
         result = runner.invoke(app, ["add", str(book)])
         assert "HF_HUB_OFFLINE=1" in result.output
+
+
+class TestDemo:
+    def test_indexes_the_sample_and_searches_it(self, tmp_path):
+        result = runner.invoke(app, ["demo", "--dir", str(tmp_path / "demo")])
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "demo" / "sample.pdf").is_file()
+        assert "Indexed" in result.output
+        assert "The Souls of Black Folk" in result.output
+        assert "Du Bois, W. E. B." in result.output  # the MLA line
+        assert "dsearch search" in result.output  # the next-steps line
+        listed = runner.invoke(app, ["list"])
+        assert "Souls of Black Folk" in listed.output
+
+    def test_second_run_is_a_skip_not_a_reindex(self, tmp_path):
+        runner.invoke(app, ["demo", "--dir", str(tmp_path / "demo")])
+        result = runner.invoke(app, ["demo", "--dir", str(tmp_path / "demo")])
+        assert result.exit_code == 0, result.output
+        assert "Already indexed" in result.output
 
 
 class TestErrorText:
