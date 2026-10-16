@@ -251,7 +251,8 @@ class TestTierGapBox:
     def test_names_sources_pages_estimate_and_alternative(self):
         text = app._gap_message(self._gap(["fast"]), total=5)
         assert "2 of 5 source(s) have no *balanced* vectors" in text
-        assert "**Chapter 4** (23 pages)" in text and "**Chapter 5** (44 pages)" in text
+        assert "**Chapter 4** (23 pages)" in text
+        assert "**Chapter 5** (44 pages)" in text
         assert "67 pages in all" in text
         assert "about 2 min" in text
         assert "default estimate" in text

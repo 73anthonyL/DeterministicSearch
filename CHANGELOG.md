@@ -14,6 +14,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Continuous integration now runs on Linux, macOS, and Windows across Python
+  3.11 to 3.13, type-checks with pyright, checks spelling, enforces a coverage
+  floor, and builds and smoke-tests the wheel. Actions are pinned to commits
+  and updated by Dependabot. Pull request titles must be conventional commits.
+- A pre-commit configuration runs the same checks locally; see
+  `CONTRIBUTING.md`.
 - Streamlit is now optional. The core install no longer pulls in pandas and
   pyarrow for people who only use the command line.
 - The version is declared once, in `pyproject.toml`, and read from package

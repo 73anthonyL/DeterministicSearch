@@ -106,7 +106,8 @@ class TestExtract:
         )
         pages = extract(path)
         assert [p.printed_page for p in pages] == [None, None, 1, 2]
-        assert pages[2].pdf_page == 3 and pages[2].printed_page == 1
+        assert pages[2].pdf_page == 3
+        assert pages[2].printed_page == 1
 
     def test_missing_folio_is_none(self, pdf_factory):
         path = pdf_factory(pages=[f"No number on this page. {BODY}"])

@@ -16,15 +16,19 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from dsearch import index
-from dsearch.chunk import Chunk
 from dsearch.index import DEFAULT_TIER, SourceMeta, SourceNotFoundError
 from dsearch.search import rrf
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
+    from dsearch.chunk import Chunk
 
 DEFAULT_TOP = 10
 

@@ -247,7 +247,8 @@ class TestNeighbours:
 
     def test_results_carry_context(self, corpus):
         result = search.search("clinic knee", k=1, corpus=corpus)[0]
-        assert result.before is not None and result.after is not None
+        assert result.before is not None
+        assert result.after is not None
 
 
 class TestPageLabel:
@@ -285,6 +286,7 @@ class TestCorpusLoading:
         corpus = search.load_corpus("fast")
         assert len(corpus.metas) == 2
         assert len(corpus) > 0
+        assert corpus.vectors is not None
         assert corpus.vectors.shape[0] == len(corpus)
 
     def test_empty_library(self):
@@ -310,8 +312,6 @@ class TestCorpusLoading:
 
     def test_source_without_the_tier_is_skipped_not_fatal(self, two_books):
         # Searching at a tier only one book has must still search that book.
-        one, _ = two_books
-        index.add_result = None
         corpus = search.load_corpus("best")
         assert len(corpus) == 0
         assert len(corpus.skipped) == 2

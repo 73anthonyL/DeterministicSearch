@@ -14,6 +14,7 @@ file a separate source even under the same name.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -23,12 +24,16 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from dsearch.chunk import DEFAULT_OVERLAP, DEFAULT_SIZE, Chunk, chunk
 from dsearch.cite import resolve_author, resolve_title
 from dsearch.extract import extract
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 # Embedding quality tiers, from the spec.
 TIERS: dict[str, str] = {
@@ -74,9 +79,9 @@ ProgressFn = Callable[[int, int], None]
 
 # Notify callbacks receive one human-readable line, printed before a long job
 # so the user knows why they are waiting.
-NotifyFn = Callable[[str], None]
+NotifyFn = Callable[[str], object]
 
-_MODEL_CACHE: dict[str, object] = {}
+_MODEL_CACHE: dict[str, SentenceTransformer] = {}
 
 
 class SourceNotFoundError(Exception):
@@ -113,7 +118,7 @@ class SourceMeta:
 
     @classmethod
     def from_dict(cls, data: dict) -> SourceMeta:
-        known = {f for f in cls.__dataclass_fields__}
+        known = set(cls.__dataclass_fields__)
         return cls(**{k: v for k, v in data.items() if k in known})
 
     @property
@@ -207,8 +212,8 @@ def format_duration(seconds: float) -> str:
     """A rough, honest duration: "about 40 s", "about 3 min", "about 1 h 10 min"."""
     seconds = max(seconds, 0.0)
     if seconds < 60:
-        return f"about {max(int(round(seconds)), 1)} s"
-    minutes = int(round(seconds / 60))
+        return f"about {max(round(seconds), 1)} s"
+    minutes = round(seconds / 60)
     if minutes < 60:
         return f"about {minutes} min"
     hours, minutes = divmod(minutes, 60)
@@ -387,7 +392,7 @@ def resolve_sources(identifier: str) -> list[SourceMeta]:
     return matches
 
 
-def load_model(tier: str):
+def load_model(tier: str) -> SentenceTransformer:
     """Load (and cache for this process) the SentenceTransformer for a tier.
 
     Imported lazily: `sentence_transformers` pulls in torch, which costs seconds
@@ -417,7 +422,7 @@ def embed_texts(
     """
     model = load_model(tier)
     if not texts:
-        return np.zeros((0, model.get_sentence_embedding_dimension()), dtype=np.float32)
+        return np.zeros((0, model.get_sentence_embedding_dimension() or 0), dtype=np.float32)
 
     total_pages = page_count or (max(pages) if pages else 1)
     started = time.perf_counter()  # After load_model, so a download is not timed.
@@ -482,12 +487,10 @@ def _meta_from_pdf(
     import pymupdf
 
     pdf_author = pdf_title = ""
-    try:
-        with pymupdf.open(path) as doc:
-            pdf_author = (doc.metadata or {}).get("author", "") or ""
-            pdf_title = (doc.metadata or {}).get("title", "") or ""
-    except Exception:
-        pass
+    # Metadata is a bonus: a PDF whose info dictionary cannot be read still indexes.
+    with contextlib.suppress(Exception), pymupdf.open(path) as doc:
+        pdf_author = (doc.metadata or {}).get("author", "") or ""
+        pdf_title = (doc.metadata or {}).get("title", "") or ""
 
     return SourceMeta(
         source_id=source_id,
@@ -564,12 +567,14 @@ def reindex(
             f"{meta.title or meta.filename} was indexed by an older version and its PDF "
             f"is no longer at {meta.path or 'a known path'}. Run `dsearch add <pdf>` on it again."
         )
-    tiers = sorted({*meta.tiers, *([tier] if tier else [])})
+    wanted = set(meta.tiers)
+    if tier:
+        wanted.add(tier)
     for old in source_dir(meta.source_id).glob("vectors_*.npy"):
         old.unlink()
     meta.tiers = []
     chunks = _extract_and_chunk(source, meta)
-    for each in tiers:
+    for each in sorted(wanted):
         embed_source(meta, each, chunks=chunks, progress=progress)
     save_meta(meta)
     return meta

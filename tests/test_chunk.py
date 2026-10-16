@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from dsearch.chunk import (
@@ -15,7 +17,7 @@ from dsearch.chunk import (
 from dsearch.extract import Page
 
 
-def make_pages(*specs: tuple[str, ...]) -> list[Page]:
+def make_pages(*specs: tuple[Any, ...]) -> list[Page]:
     """Build Pages from (text, [printed_page], [chapter]) tuples."""
     pages = []
     for index, spec in enumerate(specs, start=1):

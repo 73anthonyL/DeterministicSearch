@@ -378,7 +378,8 @@ class TestIndexVersion:
         assert result.already_indexed is False
         assert result.meta.index_version == index.INDEX_VERSION
         assert stub_embeddings["texts"] > texts_before
-        assert len(lines) == 1 and "re-extracted" in lines[0]
+        assert len(lines) == 1
+        assert "re-extracted" in lines[0]
         assert index.list_sources()[0].index_version == index.INDEX_VERSION
 
     def test_rebuild_re_embeds_every_tier_the_source_had(self, book):
@@ -417,7 +418,8 @@ class TestIndexVersion:
         assert refreshed[0].source_id == meta.source_id
         assert index.is_stale(refreshed[0])
         assert stub_embeddings["texts"] == texts_before
-        assert lines and "dsearch add" in lines[-1]
+        assert lines
+        assert "dsearch add" in lines[-1]
 
     def test_upgrade_stale_leaves_current_sources_alone(self, book, stub_embeddings):
         index.add(book)

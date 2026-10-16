@@ -27,7 +27,7 @@ def make_result(
     *,
     author="Seth Holmes",
     title="Fresh Fruit, Broken Bodies",
-    printed=47,
+    printed: int | None = 47,
     pdf_page=59,
     sentences=None,
     best=0,
@@ -191,7 +191,7 @@ class TestTitleFromFilename:
             ("Holmes2013.pdf", "Holmes 2013"),
             ("FFBB.pdf", "FFBB"),
             ("don't_panic.pdf", "Don't Panic"),
-            ("/tmp/uploads/book.PDF", "Book"),
+            ("/tmp/uploads/book.PDF", "Book"),  # noqa: S108  # a path string, never opened
         ],
     )
     def test_strips_extension_and_title_cases(self, filename, expected):
