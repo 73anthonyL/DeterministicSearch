@@ -7,6 +7,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pymupdf
 
@@ -120,6 +121,11 @@ def normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", collapsed).strip()
 
 
+def _spans(page: pymupdf.Page) -> dict:
+    """The page's span dictionary. `get_text` is typed as a union; "dict" always gives a dict."""
+    return cast("dict", page.get_text("dict"))
+
+
 def _page_text(page: pymupdf.Page) -> str:
     """Page text rebuilt from spans, with superscript spans dropped.
 
@@ -129,7 +135,7 @@ def _page_text(page: pymupdf.Page) -> str:
     falls back to the plain text layer.
     """
     blocks: list[str] = []
-    for block in page.get_text("dict").get("blocks", []):
+    for block in _spans(page).get("blocks", []):
         lines = []
         for line in block.get("lines", []):
             spans = line.get("spans", [])
@@ -139,7 +145,7 @@ def _page_text(page: pymupdf.Page) -> str:
         if lines:
             blocks.append("\n".join(lines))
     if not blocks:
-        return page.get_text("text")
+        return cast("str", page.get_text("text"))
     return "\n".join(blocks) + "\n"
 
 
@@ -147,7 +153,7 @@ def _clean_page_text(page: pymupdf.Page) -> str:
     """Extract one page's text with ligatures expanded and endnote markers removed."""
     text, stripped = strip_endnote_markers(normalize_ligatures(_page_text(page)))
     if stripped:
-        logger.debug("page %d: stripped %d endnote marker(s)", page.number + 1, stripped)
+        logger.debug("page %d: stripped %d endnote marker(s)", (page.number or 0) + 1, stripped)
     return text
 
 
@@ -224,7 +230,7 @@ def _body_font_size(doc: pymupdf.Document) -> float:
     """
     sizes: Counter[float] = Counter()
     for page in doc:
-        for block in page.get_text("dict").get("blocks", []):
+        for block in _spans(page).get("blocks", []):
             for line in block.get("lines", []):
                 for span in line.get("spans", []):
                     chars = len(span.get("text", "").strip())
@@ -240,7 +246,7 @@ def _heading_on_page(page: pymupdf.Page, body_size: float) -> str | None:
     if body_size <= 0:
         return None
     threshold = body_size * HEADING_SIZE_RATIO
-    for block in page.get_text("dict").get("blocks", []):
+    for block in _spans(page).get("blocks", []):
         for line in block.get("lines", []):
             spans = line.get("spans", [])
             text = normalize_ligatures("".join(span.get("text", "") for span in spans)).strip()
@@ -311,7 +317,7 @@ def extract(pdf_path: str | Path) -> list[Page]:
         starts = _chapters_from_toc(doc)
         if not starts:
             body_size = _body_font_size(doc)
-            for index, page in enumerate(doc, start=1):
+            for index, page in enumerate(doc.pages(), start=1):
                 heading = _heading_on_page(page, body_size)
                 if heading:
                     starts.setdefault(index, heading)

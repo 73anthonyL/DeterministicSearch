@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pymupdf
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 BODY_SIZE = 11.0
 HEADING_SIZE = 20.0
@@ -50,7 +53,7 @@ def make_pdf(
     if toc:
         doc.set_toc([list(entry) for entry in toc])
     if metadata:
-        doc.set_metadata({**doc.metadata, **metadata})
+        doc.set_metadata({**(doc.metadata or {}), **metadata})
     doc.save(path)
     doc.close()
     return path

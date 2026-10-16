@@ -18,6 +18,7 @@ from rich.progress import (
     BarColumn,
     Progress,
     ProgressColumn,
+    Task,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
@@ -148,7 +149,7 @@ class _PageColumn(ProgressColumn):
     crashing on a None format.
     """
 
-    def render(self, task) -> Text:
+    def render(self, task: Task) -> Text:
         if not task.total:
             return Text("reading pages…", style="dim")
         return Text(f"page {int(task.completed)}/{int(task.total)}", style="dim")
@@ -557,7 +558,7 @@ def ui(
             command += ["--server.port", str(port)]
         if headless:
             command += ["--server.headless", "true"]
-        raise typer.Exit(code=subprocess.call(command))
+        raise typer.Exit(code=subprocess.call(command))  # noqa: S603  # fixed argv, no shell
 
 
 def _version_callback(value: bool) -> None:

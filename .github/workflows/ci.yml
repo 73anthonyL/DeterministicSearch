@@ -5,18 +5,83 @@ on:
     branches: [main]
   pull_request:
 
+# Nothing here writes to the repository; the token is read-only everywhere.
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
-      - run: uv python install 3.11
-      # --locked fails if uv.lock is out of date with pyproject.toml, so the
-      # lockfile can never silently drift. The lock pins CPU-only torch on Linux.
       - run: uv sync --locked --all-extras --python 3.11
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run codespell
+
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv sync --locked --all-extras --python 3.11
+      - run: uv run pyright
+
+  test:
+    name: test (${{ matrix.os }}, ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    env:
+      # Rich prints box-drawing characters; Windows' default console code page cannot.
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      # --locked fails if uv.lock is out of date with pyproject.toml, so the
+      # lockfile can never silently drift. The lock pins CPU-only torch on Linux.
+      - run: uv sync --locked --all-extras --python ${{ matrix.python }}
       - run: uv run pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: true
+      - run: uv build
+      - run: uvx twine check dist/*
+      # Install the wheel into an empty environment and run it: this catches a
+      # file missing from the package (app.py, py.typed) that the test suite,
+      # which runs from the checkout, never would.
+      - name: Smoke-test the wheel
+        run: |
+          uv venv --python 3.11 /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/dsearch --version
+          /tmp/smoke/bin/dsearch --help
+          /tmp/smoke/bin/dsearch list
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/

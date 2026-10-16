@@ -564,6 +564,7 @@ class TestKeyTerms:
         monkeypatch.setattr(index, "embed_texts", explode)
         book = terms.key_terms(tier="balanced")[0]
         assert book.tier is None
+        assert book.note is not None
         assert "dsearch embed --tier balanced" in book.note
         assert texts_of(book.chapters[0])
 

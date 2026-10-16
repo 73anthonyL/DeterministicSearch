@@ -10,8 +10,10 @@ from __future__ import annotations
 import re
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING
 
-from dsearch.extract import Page
+if TYPE_CHECKING:
+    from dsearch.extract import Page
 
 # Window defaults. Three sentences is long enough to carry an argument and
 # short enough that the best-matching sentence still dominates the embedding.
@@ -130,7 +132,7 @@ class Chunk:
 
 
 def _dehyphenate(text: str) -> str:
-    """Rejoin words broken across a line break ("compan-\\nions" -> "companions").
+    r"""Rejoin words broken across a line break ("compan-\nions" -> "companions").
 
     Typesetters hyphenate at the right margin, and pymupdf preserves those
     breaks. Left alone they split words in the middle of quoted evidence. A

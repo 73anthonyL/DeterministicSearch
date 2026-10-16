@@ -40,7 +40,11 @@ ui = ["streamlit>=1.35"]
 [dependency-groups]
 dev = [
     "dsearch[ui]",
+    "codespell>=2.3",
+    "pre-commit>=4.0",
+    "pyright>=1.1.390",
     "pytest>=8.0",
+    "pytest-cov>=6.0",
     "ruff>=0.5",
 ]
 
@@ -78,7 +82,52 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = [
+    "E", "F", "I", "UP", "B", "SIM",  # the original set
+    "RUF",  # ruff's own checks
+    "PT",   # pytest style
+    "N",    # pep8 naming
+    "C4",   # comprehensions
+    "PIE",  # misc lint
+    "RET",  # return statements
+    "TC",   # type-checking-only imports
+    "S",    # bandit security checks
+    "D",    # docstrings
+]
+ignore = [
+    "D100", "D101", "D102", "D103", "D104", "D105", "D106", "D107",  # presence is not enforced
+]
+
+# Typographic quotes and dashes are data here: the extractor normalises them.
+allowed-confusables = ["’", "‘", "“", "”", "–", "—"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "D"]   # asserts are the point; test docstrings are prose, not API docs
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The floor sits just under the measured figure (92% when set) and is raised as coverage grows.
+addopts = "--cov=dsearch --cov-report=term-missing:skip-covered --cov-fail-under=90"
+
+[tool.coverage.run]
+branch = true
+source = ["dsearch"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.codespell]
+skip = "uv.lock,*.pdf,./samples,./.venv,./.git,./dist"
+ignore-words-list = "triqui,oaxaca,checkers"

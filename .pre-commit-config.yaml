@@ -1,0 +1,39 @@
+# Install once with `uv run pre-commit install`; then every commit runs these.
+# CI runs the same tools, so a hook failure here is a CI failure caught early.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-merge-conflict
+      # The guard behind "no copyrighted PDFs in git": a real book is megabytes.
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
+        additional_dependencies: [tomli]
+
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.414
+    hooks:
+      - id: pyright
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.13.1
+    hooks:
+      # Keeps uv.lock in step with pyproject.toml, so `uv sync --locked` in CI never fails on drift.
+      - id: uv-lock

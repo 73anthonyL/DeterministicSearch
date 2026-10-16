@@ -524,3 +524,46 @@ page. What follows is what that left open.
   reason here.
 - **Python 3.11 to 3.13 are declared; 3.14 is not yet.** The lock resolves
   for 3.14, but nothing exercises it until the CI matrix does.
+
+## Quality gates and CI (v0.2)
+
+- **pyright, not mypy.** It is what the editor already runs (Pylance), so a
+  CI failure is something the author saw while typing; it infers more without
+  annotations; and it is markedly faster. The configuration concepts carry
+  over one for one. `standard` mode now; `strict` can be switched on
+  module by module.
+- **Ruff rule families added: RUF, PT, N, C4, PIE, RET, TC, S, D.** `D` uses
+  the Google convention but does not require a docstring to exist (`D1xx`
+  ignored): the code already documents what matters, and a forced docstring
+  on every helper is noise. `ANN` is left out because pyright covers
+  annotations with better messages. Typographic quotes and dashes are
+  allowed as "confusables" because the extractor's whole job is to handle
+  them. Tests skip `S101` (assert) and `D`.
+- **Coverage floor of 90%, two points under the first measurement.** A floor
+  catches a change that silently drops a module from the suite; it is not a
+  target. It is raised when coverage rises.
+- **Three OSes times three Pythons in the test matrix, `fail-fast: false`.**
+  Windows and macOS are where path handling and console encoding break, and
+  nothing else exercises the 3.11 floor. All cells run so one failure shows
+  its real extent. `PYTHONUTF8=1` on every cell: Rich draws box characters
+  that the default Windows code page cannot encode.
+- **Separate `lint`, `typecheck`, `test`, and `build` jobs.** A ruff failure
+  should not wait for nine test runs, and the ruleset names the jobs it
+  requires; one combined job would make every failure look the same.
+- **The `build` job installs the wheel into an empty environment and runs
+  it.** The suite runs from the checkout, so a file missing from the package
+  (`app.py`, `py.typed`) would pass every test and fail every user.
+- **Actions pinned to commit SHAs with the version in a comment.** A tag can
+  be moved; a SHA cannot. Dependabot bumps the SHA and the comment together.
+- **Least-privilege tokens and cancelled superseded runs.** `permissions:
+  contents: read` on every workflow that needs nothing more; `concurrency`
+  cancels the run a new push makes obsolete.
+- **Pull request titles are checked for conventional-commit form.** With
+  squash merges the title *is* the commit on `main`, and the changelog is
+  generated from those commits.
+- **Dependabot groups minor and patch bumps into one weekly PR** so updates
+  arrive as one review, not fifteen.
+- **`.editorconfig` and a pre-commit hook set** mirror CI locally. The
+  large-file hook (1 MB) is the mechanism behind "no copyrighted PDFs"; the
+  `uv-lock` hook keeps `uv.lock` in step so `--locked` in CI never fails on
+  drift.
