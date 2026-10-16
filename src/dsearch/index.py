@@ -418,6 +418,7 @@ def load_model(tier: str) -> SentenceTransformer:
     _validate_tier(tier)
     if tier not in _MODEL_CACHE:
         started = time.perf_counter()
+        _quiet_model_libraries()
         from sentence_transformers import SentenceTransformer
 
         try:
@@ -433,6 +434,27 @@ def load_model(tier: str) -> SentenceTransformer:
         )
         _MODEL_CACHE[tier] = model
     return _MODEL_CACHE[tier]
+
+
+def _quiet_model_libraries() -> None:
+    """Keep the hub's and transformers' own progress bars and advisories off the terminal.
+
+    They print to stderr during a model load, between dsearch's own progress
+    bar and its results. `dsearch -v` is the way to see what the pipeline is
+    doing; these are set only if the user has not chosen otherwise.
+    """
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    # The hub sets its own logger level from this variable when it initialises,
+    # which is how its "unauthenticated requests" advisory is kept off the screen;
+    # torch's macOS redirect notice is a warning on a logger of its own.
+    os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+    logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").setLevel(logging.ERROR)
+    with contextlib.suppress(Exception):
+        from transformers.utils import logging as hf_logging
+
+        hf_logging.disable_progress_bar()
 
 
 def _model_unavailable_message(tier: str, exc: Exception) -> str:

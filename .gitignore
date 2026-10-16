@@ -1,6 +1,9 @@
 # Source material and generated indexes — never commit
 *.pdf
 samples/
+!samples/README.md
+# The one exception: the small public-domain sample typeset by scripts/make_sample.py.
+!src/dsearch/data/sample.pdf
 .dsearch/
 .claude/
 CLAUDE.md
@@ -14,6 +17,8 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+.coverage
+coverage.xml
 
 # OS
 .DS_Store

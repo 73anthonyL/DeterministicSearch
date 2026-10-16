@@ -600,3 +600,49 @@ page. What follows is what that left open.
   fixes stops reruns from re-searching; this stops a *repeated* search from
   recomputing. The model itself is already cached per process in
   `index._MODEL_CACHE`, so no `st.cache_resource` wrapper is needed.
+
+## The bundled sample and `dsearch demo` (v0.2)
+
+- **One PDF is committed, and it is generated.** The rule "never commit PDFs"
+  exists to keep copyrighted books out of git. The sample is public domain
+  (Project Gutenberg #408, 1903), typeset by `scripts/make_sample.py` from a
+  committed text, and reproduced byte for byte by that script (fixed metadata
+  dates, `no_new_id`), which a test checks. A pre-commit hook refuses any
+  file over 1 MB, so the exception cannot widen by accident.
+- **Du Bois over Mill.** *The Souls of Black Folk* is sociological and
+  argumentative prose with chapters and a famous claim-shaped passage ("How
+  does it feel to be a problem?"), which is what a student of a book like
+  *Fresh Fruit, Broken Bodies* actually searches for. *On Liberty* was the
+  runner-up and could join as a second benchmark corpus later.
+- **The sample is typeset to look like a book, not a text dump.** Title and
+  provenance pages with roman folios, a real outline, running heads that
+  alternate between the book title and the chapter title, a folio on every
+  page, and hyphenation at the margin: each is a thing the extractor has to
+  get right on a real book, and each was broken by at least one book during
+  development. A plain text-to-PDF conversion would have tested none of them.
+- **`TextWriter` with MuPDF's own fonts, not `insert_text`.** The simple API
+  encodes through Latin-1 and silently turned every em dash and curly quote
+  into a middle dot, so the sample would have taught the extractor that the
+  text was corrupt. One writer per page keeps the file at about 215 KB; one
+  per text run embedded the font resource repeatedly and doubled it.
+- **Running heads: a position rule beside the repetition rule.** The 30%
+  rule was measured on single-chapter PDFs, where each head variant is on
+  about half the pages. In a whole book the recto head changes with every
+  chapter, so each variant is on a chapter's share of pages (16% here) and
+  leaked into 10 of 259 chunks. A short line among the first or last two
+  lines of at least three pages is now furniture as well. Found by the
+  sample, which is the point of having it.
+- **`demo` copies the sample out of the package before indexing it.** The
+  library records the path it was added from, for rebuilds after an
+  index-format bump; a path inside `site-packages` is not one a reader
+  recognises or can open. The copy is skipped when it is already there.
+- **The demo's author is written pre-inverted ("Du Bois, W. E. B.").** The
+  MLA formatter inverts "First Last" by splitting on the last space, which
+  would give "Bois, W. E. B. Du". A comma in the stored name means "already
+  inverted" and is left alone; this is the documented escape hatch for
+  particles, and the sample uses it rather than special-casing one name.
+- **Model-library noise is silenced at load time, unless already set.** The
+  hub and transformers print progress bars and advisories to stderr in the
+  middle of dsearch's own output. `setdefault` on their environment switches
+  respects a user who has configured them; `dsearch -v` remains the way to
+  see what is happening.

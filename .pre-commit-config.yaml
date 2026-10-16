@@ -26,6 +26,7 @@ repos:
     hooks:
       - id: codespell
         additional_dependencies: [tomli]
+        exclude: ^src/dsearch/data/.*\.txt$  # verbatim 1903 text; spellings stay as printed
 
   - repo: https://github.com/RobertCraigie/pyright-python
     rev: v1.1.414
