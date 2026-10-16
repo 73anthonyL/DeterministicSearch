@@ -222,7 +222,8 @@ defended or reversed on purpose.
   whitespace or end of line after them so that "the 1990s" does. The one known
   false positive is a tight "p.35" with no space, which typeset books avoid.
   Counts are logged at DEBUG per page rather than printed, so an audit is
-  `DSEARCH_LOG=DEBUG`-style opt-in and a clean add stays quiet.
+  opt-in (`DSEARCH_LOG=DEBUG` or `dsearch -v`, wired up in v0.2) and a clean
+  add stays quiet.
 - **Page text is rebuilt from spans in the same block/line layout as
   `get_text("text")`.** Verified byte-identical on all 43 pages of the sample
   chapter when no spans are dropped, so folio and running-head detection see
@@ -567,3 +568,35 @@ page. What follows is what that left open.
   large-file hook (1 MB) is the mechanism behind "no copyrighted PDFs"; the
   `uv-lock` hook keeps `uv.lock` in step so `--locked` in CI never fails on
   drift.
+
+## CLI hardening (v0.2)
+
+- **Notes go to stderr; results go to stdout.** `--json` has to be pipeable,
+  and a "Note: skipped X" line in the middle of a JSON array is not. Errors
+  were already on stderr; moving the notes makes the rule simple: stdout is
+  data, stderr is commentary.
+- **`--json` emits with the standard library, not Rich.** Rich wraps long
+  lines to the terminal width; a wrapped JSON document is a broken one.
+- **A search result's JSON includes all three citation forms.** A script
+  that consumes results almost always wants the citation too, and composing
+  it from `cite` is the CLI's job, not the caller's.
+- **`Tier` is a `StrEnum` so Typer validates and completes it.** A string
+  checked at runtime produced a custom error after the command had started;
+  an enum produces Click's usage error before it does. The pipeline keeps
+  taking plain strings (`tier.value`), so nothing below the CLI changed.
+- **`ModelUnavailableError` wraps `OSError` from `SentenceTransformer`.** The
+  hub's offline and connection failures are `OSError` subclasses; the message
+  names the likely cause (no network, or `HF_HUB_OFFLINE` before the first
+  run) and points at `dsearch doctor` for the cache path. One line, exit 1.
+- **`doctor` probes the device by importing torch, nothing else does.** The
+  rest of `doctor` reads metadata and directories; the import is the slow
+  line and is wrapped so a broken binary is reported, not fatal.
+- **Logging is a Rich handler on the `dsearch` logger only**, installed by
+  the CLI callback or `DSEARCH_LOG`; library code logs and never configures.
+  Reconfiguring replaces the handler, so tests and the app cannot stack
+  duplicates.
+- **The web UI memoises `search` with `st.cache_data`, keyed on the query
+  and the library file's mtime.** The session-state cache from v0.2's bug
+  fixes stops reruns from re-searching; this stops a *repeated* search from
+  recomputing. The model itself is already cached per process in
+  `index._MODEL_CACHE`, so no `st.cache_resource` wrapper is needed.

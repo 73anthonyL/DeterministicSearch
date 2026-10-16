@@ -1,10 +1,12 @@
-"""The `dsearch` command line: add, list, remove, search, terms, ui."""
+"""The `dsearch` command line: add, list, edit, remove, search, embed, terms, doctor, ui."""
 
 from __future__ import annotations
 
+import dataclasses
 import glob
 import importlib.resources
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -26,17 +28,19 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from dsearch import __version__
+from dsearch import __version__, log
 from dsearch.chunk import DEFAULT_OVERLAP, DEFAULT_SIZE
-from dsearch.cite import mla, quoted_line
+from dsearch.cite import citation_block, mla, parenthetical, quoted_line
+from dsearch.doctor import diagnostics, format_bytes
 from dsearch.extract import NoTextLayerError
 from dsearch.index import (
-    DEFAULT_TIER,
     TIERS,
     AddResult,
     AmbiguousSourceError,
+    ModelUnavailableError,
     SourceMeta,
     SourceNotFoundError,
+    Tier,
     TierGap,
     available_tiers,
     embed_source,
@@ -59,7 +63,7 @@ from dsearch.index import (
 from dsearch.index import (
     remove as index_remove,
 )
-from dsearch.search import DEFAULT_K, Result
+from dsearch.search import DEFAULT_K, Result, load_corpus
 from dsearch.search import search as run_search
 from dsearch.terms import DEFAULT_TOP, BookTerms, key_terms
 
@@ -70,13 +74,16 @@ NEIGHBOUR_CHARS = 180
 app = typer.Typer(
     name="dsearch",
     help="Local-first semantic evidence search for academic PDFs. Retrieval only.",
-    add_completion=False,
     no_args_is_help=True,
 )
 console = Console()
 errors = Console(stderr=True)
 
 _TIER_HELP = f"Embedding quality: {' | '.join(TIERS)}."
+_JSON_HELP = "Print JSON to stdout instead of a table or panels."
+
+# Set by --quiet: informational notes are dropped, errors are not.
+_quiet = False
 
 
 def _fail(message: str) -> NoReturn:
@@ -169,7 +176,27 @@ def _page_progress() -> Progress:
 
 
 def _note(message: str) -> None:
-    console.print(f"[yellow]Note[/yellow] {message}")
+    """An informational line, on stderr so that `--json` output stays parseable."""
+    if not _quiet:
+        errors.print(f"[yellow]Note[/yellow] {message}")
+
+
+def _emit_json(payload: object) -> None:
+    """Machine-readable output: plain stdout, no Rich wrapping or styling."""
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _result_json(result: Result) -> dict:
+    """A result plus the three citation forms the panel shows."""
+    return {
+        **result.to_dict(),
+        "citation": {
+            "mla": mla(result),
+            "in_text": parenthetical(result),
+            "quoted_line": quoted_line(result),
+            "block": citation_block(result),
+        },
+    }
 
 
 def _scoped_sources(source: str | None) -> list[SourceMeta]:
@@ -284,10 +311,10 @@ def add(
     title: Annotated[
         str | None, typer.Option(help="Title, for citations (single PDF only).")
     ] = None,
-    tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
-    chunk_size: Annotated[int, typer.Option(help="Sentences per chunk.")] = DEFAULT_SIZE,
+    tier: Annotated[Tier, typer.Option(help=_TIER_HELP)] = Tier.fast,
+    chunk_size: Annotated[int, typer.Option(min=1, help="Sentences per chunk.")] = DEFAULT_SIZE,
     overlap: Annotated[
-        int, typer.Option(help="Sentences shared between chunks.")
+        int, typer.Option(min=0, help="Sentences shared between chunks.")
     ] = DEFAULT_OVERLAP,
 ) -> None:
     """Index one or more PDFs into your library."""
@@ -323,17 +350,19 @@ def add(
                     path,
                     author=author,
                     title=title,
-                    tier=tier,
+                    tier=tier.value,
                     chunk_size=chunk_size,
                     overlap=overlap,
                     progress=tick,
                     notify=_note,
                 )
+            except ModelUnavailableError as exc:
+                _fail(str(exc))  # Nothing else will succeed without the model.
             except (FileNotFoundError, NoTextLayerError, ValueError) as exc:
                 failures += 1
                 errors.print(f"[bold red]Error[/bold red] {escape(str(path))}: {escape(str(exc))}")
                 continue
-            _report_add(result, tier)
+            _report_add(result, tier.value)
             warning = result.warning or warning
 
     if warning:
@@ -343,9 +372,22 @@ def add(
 
 
 @app.command("list")
-def list_command() -> None:
+def list_command(
+    json_output: Annotated[bool, typer.Option("--json", help=_JSON_HELP)] = False,
+) -> None:
     """Show every source in your library."""
     sources = index_list()
+    if json_output:
+        _emit_json(
+            {
+                "library": str(home()),
+                "sources": [
+                    {**meta.to_dict(), "tiers_available": available_tiers(meta.source_id)}
+                    for meta in sources
+                ],
+            }
+        )
+        return
     if not sources:
         console.print("[dim]Your library is empty. Add a PDF with[/dim] dsearch add <file.pdf>")
         return
@@ -399,32 +441,39 @@ def remove(
 @app.command()
 def search(
     query: Annotated[str, typer.Argument(help="A question, a phrase, or a whole paragraph.")],
-    k: Annotated[int, typer.Option("--k", "-k", help="How many passages to return.")] = DEFAULT_K,
+    k: Annotated[
+        int, typer.Option("--k", "-k", min=1, help="How many passages to return.")
+    ] = DEFAULT_K,
     source: Annotated[
         str | None,
         typer.Option(help="Limit to one source, or by title to every file of one book."),
     ] = None,
-    tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
+    tier: Annotated[Tier, typer.Option(help=_TIER_HELP)] = Tier.fast,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Embed missing tiers without asking.")
     ] = False,
+    json_output: Annotated[bool, typer.Option("--json", help=_JSON_HELP)] = False,
 ) -> None:
     """Find page-cited passages that answer a query."""
     try:
         scoped = _upgrade_stale_sources(_scoped_sources(source))
-        gap = tier_gap(tier, scoped)
+        gap = tier_gap(tier.value, scoped)
         if not gap.is_empty:
             _describe_gap(gap, len(scoped))
             if not (yes or _confirm_embedding(gap)):
-                console.print("[dim]Nothing embedded; search not run.[/dim]")
+                errors.print("[dim]Nothing embedded; search not run.[/dim]")
                 return
             _embed_missing(gap)
-        results = run_search(query, k=k, tier=tier, source=source)
-    except (SourceNotFoundError, AmbiguousSourceError) as exc:
-        _fail(str(exc))
-    except ValueError as exc:
+        corpus = load_corpus(tier.value, source)
+        for name in corpus.skipped:
+            _note(f"Skipped {name}: no usable {tier.value} vectors.")
+        results = run_search(query, k=k, tier=tier.value, source=source, corpus=corpus)
+    except (SourceNotFoundError, AmbiguousSourceError, ValueError, ModelUnavailableError) as exc:
         _fail(str(exc))
 
+    if json_output:
+        _emit_json([_result_json(result) for result in results])
+        return
     if not results:
         console.print(
             "[yellow]No passages found.[/yellow] "
@@ -439,7 +488,7 @@ def search(
 
 @app.command()
 def embed(
-    tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
+    tier: Annotated[Tier, typer.Option(help=_TIER_HELP)] = Tier.fast,
     source: Annotated[
         list[str] | None,
         typer.Option(help="Limit to these sources (repeatable). Default: the whole library."),
@@ -449,8 +498,8 @@ def embed(
     try:
         scoped = [m for name in source for m in resolve_sources(name)] if source else index_list()
         scoped = _upgrade_stale_sources(scoped)
-        gap = tier_gap(tier, scoped)
-    except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+        gap = tier_gap(tier.value, scoped)
+    except (SourceNotFoundError, AmbiguousSourceError, ValueError, ModelUnavailableError) as exc:
         _fail(str(exc))
 
     if not scoped:
@@ -459,11 +508,23 @@ def embed(
     if gap.is_empty:
         console.print(
             f"[green]Nothing to do[/green] — all {len(scoped)} source(s) already have "
-            f"[bold]{tier}[/bold] vectors."
+            f"[bold]{tier.value}[/bold] vectors."
         )
         return
     _describe_gap(gap, len(scoped))
-    _embed_missing(gap)
+    try:
+        _embed_missing(gap)
+    except ModelUnavailableError as exc:
+        _fail(str(exc))
+
+
+def _book_json(book: BookTerms) -> dict:
+    """A book's terms as data, with each term's page label spelled out."""
+    payload = dataclasses.asdict(book)
+    for chapter, chapter_data in zip(book.chapters, payload["chapters"], strict=True):
+        for term, term_data in zip(chapter.terms, chapter_data["terms"], strict=True):
+            term_data["page_label"] = term.page_label
+    return payload
 
 
 def _book_heading(book: BookTerms) -> str:
@@ -498,12 +559,13 @@ def terms(
     source: Annotated[
         str | None, typer.Option(help="Limit to one source's chapters, or one book's by title.")
     ] = None,
-    tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
-    top: Annotated[int, typer.Option(help="Terms to show per chapter.")] = DEFAULT_TOP,
+    tier: Annotated[Tier, typer.Option(help=_TIER_HELP)] = Tier.fast,
+    top: Annotated[int, typer.Option(min=1, help="Terms to show per chapter.")] = DEFAULT_TOP,
     no_rerank: Annotated[
         bool,
         typer.Option("--no-rerank", help="Rank by word counts only; instant, loads no model."),
     ] = False,
+    json_output: Annotated[bool, typer.Option("--json", help=_JSON_HELP)] = False,
 ) -> None:
     """Show the terms that set each chapter apart from the rest of its book."""
     try:
@@ -513,11 +575,14 @@ def terms(
                     f"{meta.title or meta.filename} ({meta.short_id}) was indexed by an older "
                     "version; run `dsearch add` on its PDF again for cleaner terms."
                 )
-        with console.status("Ranking terms…"):
-            books = key_terms(source=source, tier=tier, top=top, rerank=not no_rerank)
-    except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+        with errors.status("Ranking terms…"):
+            books = key_terms(source=source, tier=tier.value, top=top, rerank=not no_rerank)
+    except (SourceNotFoundError, AmbiguousSourceError, ValueError, ModelUnavailableError) as exc:
         _fail(str(exc))
 
+    if json_output:
+        _emit_json([_book_json(book) for book in books])
+        return
     if not books:
         console.print("[dim]Your library is empty. Add a PDF with[/dim] dsearch add <file.pdf>")
         return
@@ -533,6 +598,48 @@ def terms(
                 "terms are ranked by frequency."
             )
         console.print(_terms_table(book))
+
+
+def _doctor_report(info: dict) -> None:
+    """The diagnostics as a short readable table."""
+    table = Table(box=None, pad_edge=False, show_header=False)
+    table.add_column(style="bold")
+    table.add_column()
+    table.add_row("dsearch", info["dsearch"])
+    table.add_row("python", f"{info['python']}  ({info['executable']})")
+    table.add_row("platform", info["platform"])
+    library = info["library"]
+    state = (
+        f"{library['sources']} source(s), {format_bytes(library['bytes'])}"
+        if library["exists"]
+        else "[dim]not created yet[/dim]"
+    )
+    table.add_row("library", f"{library['path']}  —  {state}")
+    models = info["models"]
+    table.add_row("model cache", models["cache"])
+    for tier, detail in models["tiers"].items():
+        cached = "[green]cached[/green]" if detail["cached"] else "[dim]not downloaded[/dim]"
+        table.add_row(f"  {tier}", f"{detail['model']}  —  {cached}")
+    table.add_row("offline", "yes (HF_HUB_OFFLINE)" if models["offline"] else "no")
+    table.add_row("device", models["device"])
+    for name, version in info["packages"].items():
+        table.add_row(name, version or "[dim]not installed[/dim]")
+    table.add_row(
+        "web ui", "available" if info["ui_available"] else "[dim]pip install 'dsearch[ui]'[/dim]"
+    )
+    console.print(table)
+
+
+@app.command()
+def doctor(
+    json_output: Annotated[bool, typer.Option("--json", help=_JSON_HELP)] = False,
+) -> None:
+    """Show versions, paths, cached models, and the compute device, for bug reports."""
+    info = diagnostics()
+    if json_output:
+        _emit_json(info)
+    else:
+        _doctor_report(info)
 
 
 @app.command()
@@ -573,8 +680,20 @@ def main_callback(
         bool,
         typer.Option("--version", callback=_version_callback, is_eager=True, help="Show version."),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose", "-v", help="Log what the pipeline is doing (same as DSEARCH_LOG=DEBUG)."
+        ),
+    ] = False,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", "-q", help="Drop informational notes; errors still print.")
+    ] = False,
 ) -> None:
     """Local-first semantic evidence search for academic PDFs."""
+    global _quiet
+    _quiet = quiet
+    log.configure("DEBUG" if verbose else ("ERROR" if quiet else None), console=errors)
 
 
 def main() -> None:

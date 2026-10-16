@@ -23,6 +23,7 @@ from dsearch.index import (
     INDEX_VERSION,
     TIERS,
     AmbiguousSourceError,
+    ModelUnavailableError,
     SourceMeta,
     SourceNotFoundError,
     TierGap,
@@ -31,6 +32,7 @@ from dsearch.index import (
     edit,
     embed_source,
     format_duration,
+    library_path,
     list_sources,
     remove,
     resolve_sources,
@@ -165,7 +167,7 @@ def _index_one(upload, author: str, title: str, tier: str, size: int, overlap: i
             progress=tick,
             notify=st.info,
         )
-    except (NoTextLayerError, ValueError, FileNotFoundError) as exc:
+    except (NoTextLayerError, ValueError, FileNotFoundError, ModelUnavailableError) as exc:
         st.error(f"{upload.name}: {exc}")
         return None
     finally:
@@ -285,7 +287,7 @@ def _key_terms_section(tier: str) -> None:
             try:
                 with st.spinner("Ranking terms…"):
                     shown = {"tier": tier, "books": key_terms(tier=tier, top=top)}
-            except (SourceNotFoundError, ValueError) as exc:
+            except (SourceNotFoundError, ValueError, ModelUnavailableError) as exc:
                 st.error(str(exc))
                 return
             st.session_state["terms"] = shown
@@ -346,6 +348,23 @@ def _embed_missing(gap: TierGap) -> None:
 
         embed_source(meta, gap.tier, progress=tick)
     bar.empty()
+
+
+def _library_stamp() -> int:
+    """Changes whenever the library does; part of the search cache key."""
+    path = library_path()
+    return path.stat().st_mtime_ns if path.is_file() else 0
+
+
+@st.cache_data(show_spinner=False)
+def _cached_search(query: str, k: int, tier: str, source: str | None, stamp: int) -> list[Result]:
+    """`search`, memoised on its inputs and the library's modification time.
+
+    Re-running a query after a widget change or a page reload costs nothing;
+    adding, removing, or re-embedding a source changes `stamp` and so the key.
+    """
+    del stamp  # Only part of the key.
+    return search(query, k=k, tier=tier, source=source)
 
 
 def _ensure_tier(tier: str, source: str | None) -> bool:
@@ -500,10 +519,19 @@ def main() -> None:
             if not _ensure_tier(pending["tier"], pending["source"]):
                 return
             with st.spinner("Searching…"):
-                results = search(
-                    pending["query"], k=pending["k"], tier=pending["tier"], source=pending["source"]
+                results = _cached_search(
+                    pending["query"],
+                    pending["k"],
+                    pending["tier"],
+                    pending["source"],
+                    _library_stamp(),
                 )
-        except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+        except (
+            SourceNotFoundError,
+            AmbiguousSourceError,
+            ValueError,
+            ModelUnavailableError,
+        ) as exc:
             st.error(str(exc))
             return
         st.session_state["results"] = results

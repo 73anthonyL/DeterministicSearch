@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `dsearch doctor` prints versions, the library path and size, the model
+  cache and which tiers are downloaded, the compute device, and whether the
+  web UI is installed; `--json` for bug reports.
+- `--json` on `list`, `search`, and `terms` prints machine-readable output.
+  A search result carries the passage, its page, its context, and the MLA,
+  in-text, and quoted-line citations.
+- `-v/--verbose` (or `DSEARCH_LOG=DEBUG`) logs model loads, corpus sizes,
+  and embedding throughput to stderr; `-q/--quiet` drops informational notes.
+- Shell completion: `dsearch --install-completion`.
 - `dsearch ui` opens the web UI from any install, including a wheel; it needs
   the new `ui` extra (`pip install 'dsearch[ui]'`).
 - `py.typed`, so type checkers read the package's annotations.
@@ -34,6 +43,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A model that cannot be downloaded (no network, or `HF_HUB_OFFLINE` set
+  before the first run) is reported in one line naming the cause and the
+  cache location, instead of a traceback.
+- `--tier` is validated as a choice, and `--k`, `--top`, and `--chunk-size`
+  reject values below one, before any work starts.
+- `search` says which sources it skipped for lacking vectors at the tier.
+- Informational notes go to stderr, so piped output holds only results.
+- The web UI memoises search results on the query and the library's
+  modification time, so repeating a search is instant.
 - Searching, embedding, or listing terms with `--source <title>` now selects
   every file that shares that title (a book added as one PDF per chapter),
   instead of failing as ambiguous. `remove` and `edit` still require a single
