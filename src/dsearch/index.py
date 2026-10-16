@@ -17,12 +17,14 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import shutil
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import date
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,6 +37,8 @@ from dsearch.extract import extract
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
+logger = logging.getLogger(__name__)
+
 # Embedding quality tiers, from the spec.
 TIERS: dict[str, str] = {
     "fast": "all-MiniLM-L6-v2",
@@ -42,6 +46,15 @@ TIERS: dict[str, str] = {
     "best": "BAAI/bge-base-en-v1.5",
 }
 DEFAULT_TIER = "fast"
+
+
+class Tier(StrEnum):
+    """The tier names as a choice type, so the CLI validates and completes them."""
+
+    fast = "fast"
+    balanced = "balanced"
+    best = "best"
+
 
 # Bumped whenever extraction or chunking changes what ends up in chunks.jsonl,
 # so that a library built by an older release is rebuilt rather than searched
@@ -86,6 +99,10 @@ _MODEL_CACHE: dict[str, SentenceTransformer] = {}
 
 class SourceNotFoundError(Exception):
     """Raised when an identifier matches no source in the library."""
+
+
+class ModelUnavailableError(Exception):
+    """An embedding model could not be loaded: usually no network on first use."""
 
 
 class AmbiguousSourceError(Exception):
@@ -400,10 +417,36 @@ def load_model(tier: str) -> SentenceTransformer:
     """
     _validate_tier(tier)
     if tier not in _MODEL_CACHE:
+        started = time.perf_counter()
         from sentence_transformers import SentenceTransformer
 
-        _MODEL_CACHE[tier] = SentenceTransformer(TIERS[tier])
+        try:
+            model = SentenceTransformer(TIERS[tier])
+        except OSError as exc:  # The hub's offline and connection errors are OSErrors.
+            raise ModelUnavailableError(_model_unavailable_message(tier, exc)) from exc
+        logger.debug(
+            "loaded %s model %s on %s in %.1fs",
+            tier,
+            TIERS[tier],
+            getattr(model, "device", "?"),
+            time.perf_counter() - started,
+        )
+        _MODEL_CACHE[tier] = model
     return _MODEL_CACHE[tier]
+
+
+def _model_unavailable_message(tier: str, exc: Exception) -> str:
+    offline = os.environ.get("HF_HUB_OFFLINE")
+    reason = (
+        f"HF_HUB_OFFLINE={offline} is set and the model is not in the local cache"
+        if offline
+        else "the download failed (no network, or the Hugging Face Hub is unreachable)"
+    )
+    return (
+        f"Could not load the {tier} model ({TIERS[tier]}): {reason}. The first use of a "
+        "tier downloads it once (about 90 MB for fast); after that it is read from the cache. "
+        f"`dsearch doctor` shows the cache location. ({type(exc).__name__})"
+    )
 
 
 def embed_texts(
@@ -441,8 +484,10 @@ def embed_texts(
             done = pages[min(start + len(batch), len(pages)) - 1] if pages else total_pages
             progress(min(done, total_pages), total_pages)
 
+    elapsed = time.perf_counter() - started
+    logger.debug("embedded %d texts at tier %s in %.1fs", len(texts), tier, elapsed)
     if page_count:
-        record_embed_rate(tier, page_count, time.perf_counter() - started)
+        record_embed_rate(tier, page_count, elapsed)
     return np.vstack(out).astype(np.float32)
 
 

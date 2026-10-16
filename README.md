@@ -298,6 +298,41 @@ FIVE “Doctors Don’t Know Anything”  patients     114  p. 115 (PDF 5)
                                     clinic        83  p. 127 (PDF 17)
 ```
 
+### `doctor` — what is installed, where
+
+```
+$ dsearch doctor
+
+dsearch      0.2.0
+python       3.12.4  (/Users/you/.venv/bin/python)
+platform     macOS-15.0-arm64-arm-64bit
+library      /Users/you/.dsearch  —  5 source(s), 12.4 MB
+model cache  /Users/you/.cache/huggingface/hub
+  fast       all-MiniLM-L6-v2  —  cached
+  balanced   all-mpnet-base-v2  —  cached
+  best       BAAI/bge-base-en-v1.5  —  not downloaded
+offline      no
+device       mps
+pymupdf      1.28.2
+…
+```
+
+Paste it into a bug report. `--json` gives the same as data.
+
+### Machine-readable output and logging
+
+`list`, `search`, and `terms` take `--json`. A search result carries the
+passage, its page, its neighbours, and the MLA, in-text, and quoted-line
+citations:
+
+```bash
+dsearch search "housing in the camps" --json | jq '.[0].citation'
+```
+
+Informational notes go to stderr, so stdout is always just the data.
+`dsearch -v <command>` (or `DSEARCH_LOG=DEBUG`) logs model loads, corpus
+sizes, and embedding throughput; `-q` drops the notes.
+
 ### `remove` — drop a source
 
 ```

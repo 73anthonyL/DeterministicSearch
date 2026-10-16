@@ -6,7 +6,9 @@ PDF, addressed by source, page, and sentence.
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -37,6 +39,8 @@ CANDIDATE_POOL = 200
 
 DEFAULT_K = 5
 
+logger = logging.getLogger(__name__)
+
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -64,6 +68,28 @@ class Result:
         if self.chunk.printed_page is not None:
             return f"p. {self.chunk.printed_page} (PDF {self.chunk.pdf_page})"
         return f"PDF p. {self.chunk.pdf_page}"
+
+    def to_dict(self) -> dict:
+        """A JSON-ready view: the passage, where it is from, and its context.
+
+        The chunk is included whole so a consumer can re-identify it by
+        (`source_id`, `chunk_id`); context is text only.
+        """
+        return {
+            "score": self.score,
+            "source": {
+                "source_id": self.meta.source_id,
+                "title": self.meta.title,
+                "author": self.meta.author,
+                "filename": self.meta.filename,
+            },
+            "page_label": self.page_label,
+            "chunk": self.chunk.to_dict(),
+            "best_sentence": self.best_sentence,
+            "best_sentence_text": self.best_sentence_text,
+            "before": self.before.text if self.before else None,
+            "after": self.after.text if self.after else None,
+        }
 
 
 @dataclass
@@ -129,6 +155,13 @@ def load_corpus(tier: str = DEFAULT_TIER, source: str | None = None) -> Corpus:
         corpus.metas[meta.source_id] = meta
 
     corpus.vectors = np.vstack(blocks) if blocks else None
+    logger.debug(
+        "corpus: %d chunks from %d source(s) at tier %s; skipped %d",
+        len(corpus),
+        len(corpus.metas),
+        tier,
+        len(corpus.skipped),
+    )
     return corpus
 
 
@@ -227,9 +260,11 @@ def search(
     if not len(corpus) or corpus.vectors is None:
         return []
 
+    started = time.perf_counter()
     query_vectors = _query_matrix(query, tier)
     dense = _dense_scores(query_vectors, corpus.vectors)
     keyword = _bm25_scores(query, corpus)
+    logger.debug("ranked %d chunks in %.2fs", len(corpus), time.perf_counter() - started)
     fused = rrf(
         [
             _rank(dense, CANDIDATE_POOL, positive_only=False),

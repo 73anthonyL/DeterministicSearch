@@ -5,6 +5,9 @@ Embedding is stubbed so these run offline and fast.
 
 from __future__ import annotations
 
+import json
+import sys
+import types
 import zlib
 
 import numpy as np
@@ -108,9 +111,11 @@ class TestAdd:
         assert "Traceback" not in result.output
 
     def test_unknown_tier_is_rejected(self, book):
-        result = runner.invoke(app, ["add", str(book), "--tier", "turbo"])
-        assert result.exit_code == 1
-        assert "Unknown tier" in result.output
+        # Typer validates the choice before the command runs: a usage error, exit 2.
+        result = runner.invoke(app, ["add", str(book), "--tier", "ultra"])
+        assert result.exit_code == 2
+        assert "fast" in result.output
+        assert "Traceback" not in result.output
 
     def test_accepts_chunking_options(self, book):
         result = runner.invoke(app, ["add", str(book), "--chunk-size", "2", "--overlap", "0"])
@@ -281,8 +286,10 @@ class TestSearch:
         assert "Chapter 1" not in result.output
 
     def test_zero_k_is_rejected(self, added):
+        # Validated by the option itself (min=1): a usage error, exit 2, before any work.
         result = runner.invoke(app, ["search", "knee", "--k", "0"])
-        assert result.exit_code == 1
+        assert result.exit_code == 2
+        assert "Traceback" not in result.output
 
     def test_accepts_a_paragraph_query(self, added):
         paragraph = (
@@ -320,6 +327,136 @@ class TestUi:
         assert result.exit_code == 1
         assert "dsearch[ui]" in result.output
         assert "Traceback" not in result.output
+
+
+class TestJsonOutput:
+    def test_list_json(self, added):
+        result = runner.invoke(app, ["list", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["sources"][0]["title"] == "Fresh Fruit, Broken Bodies"
+        assert payload["sources"][0]["tiers_available"] == ["fast"]
+        assert "library" in payload
+
+    def test_list_json_of_an_empty_library(self):
+        result = runner.invoke(app, ["list", "--json"])
+        assert result.exit_code == 0
+        assert json.loads(result.stdout)["sources"] == []
+
+    def test_search_json_carries_passage_page_and_citations(self, added):
+        result = runner.invoke(app, ["search", "knee pain", "--json", "-k", "2"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert len(payload) == 2
+        first = payload[0]
+        assert first["source"]["title"] == "Fresh Fruit, Broken Bodies"
+        assert first["page_label"].startswith("p. ")
+        assert first["best_sentence_text"] in first["chunk"]["text"]
+        assert first["citation"]["mla"].startswith("Holmes, Seth.")
+        assert first["citation"]["in_text"].startswith("(Holmes")
+
+    def test_search_json_with_no_results_is_an_empty_list(self):
+        result = runner.invoke(app, ["search", "knee", "--json"])  # empty library
+        assert result.exit_code == 0
+        assert json.loads(result.stdout) == []
+
+    def test_terms_json(self, added):
+        result = runner.invoke(app, ["terms", "--json", "--no-rerank"])
+        assert result.exit_code == 0, result.output
+        books = json.loads(result.stdout)
+        assert books[0]["title"] == "Fresh Fruit, Broken Bodies"
+        assert "page_label" in books[0]["chapters"][0]["terms"][0]
+
+    def test_notes_do_not_pollute_json_stdout(self, added, monkeypatch):
+        # A skipped source produces a note; it must go to stderr.
+        monkeypatch.setattr(
+            "dsearch.cli.load_corpus",
+            lambda tier, source=None: _corpus_with_skip(tier, source),
+        )
+        result = runner.invoke(app, ["search", "knee", "--json"])
+        assert result.exit_code == 0, result.output
+        json.loads(result.stdout)  # parses despite the note
+        assert "Skipped" in result.output
+
+
+def _corpus_with_skip(tier, source):
+    corpus = search.load_corpus(tier, source)
+    corpus.skipped.append("Ghost Book")
+    return corpus
+
+
+class TestDoctor:
+    def test_prints_versions_paths_and_models(self, book):
+        result = runner.invoke(app, ["doctor"])
+        assert result.exit_code == 0, result.output
+        for word in ("dsearch", "python", "library", "model cache", "fast", "device", "pymupdf"):
+            assert word in result.output
+
+    def test_json(self):
+        result = runner.invoke(app, ["doctor", "--json"])
+        assert result.exit_code == 0
+        info = json.loads(result.stdout)
+        assert set(info["models"]["tiers"]) == {"fast", "balanced", "best"}
+
+
+class TestVerbosity:
+    def test_verbose_logs_pipeline_steps(self, added):
+        result = runner.invoke(app, ["-v", "search", "knee"])
+        assert result.exit_code == 0, result.output
+        assert "corpus:" in result.output  # the DEBUG line from load_corpus
+
+    def test_env_var_does_the_same(self, added, monkeypatch):
+        monkeypatch.setenv("DSEARCH_LOG", "DEBUG")
+        result = runner.invoke(app, ["search", "knee"])
+        assert "corpus:" in result.output
+
+    def test_silent_by_default(self, added):
+        result = runner.invoke(app, ["search", "knee"])
+        assert "corpus:" not in result.output
+
+    def test_quiet_drops_notes_but_not_errors(self, added, monkeypatch):
+        monkeypatch.setattr(
+            "dsearch.cli.load_corpus",
+            lambda tier, source=None: _corpus_with_skip(tier, source),
+        )
+        result = runner.invoke(app, ["-q", "search", "knee"])
+        assert result.exit_code == 0
+        assert "Skipped" not in result.output
+        result = runner.invoke(app, ["-q", "search", "knee", "--source", "nope"])
+        assert result.exit_code == 1
+        assert "No source matches" in result.output
+
+
+class TestModelUnavailable:
+    @pytest.fixture
+    def no_model(self, monkeypatch):
+        """A hub that cannot be reached, behind the real `load_model` path."""
+
+        class Boom:
+            def __init__(self, name):
+                raise OSError("We couldn't connect to 'https://huggingface.co'")
+
+        monkeypatch.setitem(
+            sys.modules, "sentence_transformers", types.SimpleNamespace(SentenceTransformer=Boom)
+        )
+        index._MODEL_CACHE.clear()
+
+        def embed_via_model(texts, tier=index.DEFAULT_TIER, **kwargs):
+            index.load_model(tier)
+            raise AssertionError("load_model should have failed")
+
+        monkeypatch.setattr(index, "embed_texts", embed_via_model)
+
+    def test_add_fails_with_one_line(self, book, no_model):
+        result = runner.invoke(app, ["add", str(book)])
+        assert result.exit_code == 1
+        assert "Could not load the fast model" in result.output
+        assert "Traceback" not in result.output
+
+    def test_offline_flag_is_named(self, book, no_model, monkeypatch):
+        monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+        result = runner.invoke(app, ["add", str(book)])
+        assert "HF_HUB_OFFLINE=1" in result.output
 
 
 class TestErrorText:
@@ -540,10 +677,10 @@ class TestTerms:
 
     def test_unknown_tier_is_a_clean_error(self, chapters):
         result = runner.invoke(app, ["terms", "--tier", "turbo"])
-        assert result.exit_code == 1
-        assert "Unknown tier" in result.output
+        assert result.exit_code == 2
+        assert "Traceback" not in result.output
 
     def test_non_positive_top_is_a_clean_error(self, chapters):
         result = runner.invoke(app, ["terms", "--top", "0"])
-        assert result.exit_code == 1
-        assert "top must be at least 1" in result.output
+        assert result.exit_code == 2
+        assert "Traceback" not in result.output
