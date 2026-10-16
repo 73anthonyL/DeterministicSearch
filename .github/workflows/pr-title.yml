@@ -29,5 +29,6 @@ jobs:
             ci
             chore
           requireScope: false
-          subjectPattern: ^[a-z].*$
-          subjectPatternError: The subject must start with a lowercase letter.
+          # Lowercase, or a digit for `chore(release): 0.2.0`.
+          subjectPattern: ^[a-z0-9].*$
+          subjectPatternError: The subject must start with a lowercase letter or a digit.
