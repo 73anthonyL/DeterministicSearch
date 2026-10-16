@@ -1,5 +1,11 @@
 # dsearch
 
+[![CI](https://github.com/73anthonyL/DeterministicSearch/actions/workflows/ci.yml/badge.svg)](https://github.com/73anthonyL/DeterministicSearch/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/dsearch.svg)](https://pypi.org/project/dsearch/)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://github.com/microsoft/pyright)
+
 **Local-first semantic evidence search for academic PDFs.**
 
 Add a book, ask a question in plain language, and get back real page-cited
@@ -17,24 +23,33 @@ cached; after that, searching needs no network at all.
 
 ## Install
 
-Python 3.11, 3.12, or 3.13. Until the first PyPI release, install from the
-repository; the `ui` extra adds the web interface:
+Python 3.11, 3.12, or 3.13. One command; the `ui` extra adds the web
+interface:
 
 ```bash
-pipx install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"
-# or:  uv tool install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"
+pipx install "dsearch[ui]"          # or: uv tool install "dsearch[ui]"
 ```
 
-From a clone, for development:
-
-```bash
-git clone https://github.com/73anthonyL/DeterministicSearch.git && cd DeterministicSearch
-uv sync --all-extras          # creates .venv with the exact locked versions
-uv run dsearch --help         # or: source .venv/bin/activate
-```
+`pip install "dsearch[ui]"` inside a virtual environment works too. Until the
+first PyPI release lands, use the repository instead:
+`pipx install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"`.
 
 The first `dsearch add` downloads the embedding model (about 90 MB for the
 default `fast` tier); everything after that is offline.
+
+<details>
+<summary>Linux and plain pip: keep torch small</summary>
+
+On Linux the default `torch` wheel bundles CUDA libraries this tool never
+uses. Install the CPU build first:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install "dsearch[ui]"
+```
+
+`uv` does this automatically from the project's configuration.
+</details>
 
 ## Try it in two minutes
 
@@ -42,6 +57,8 @@ A public-domain book ships inside the package: the Forethought and first three
 chapters of W. E. B. Du Bois, *The Souls of Black Folk* (1903), typeset with
 front matter, an outline, running heads, and printed page numbers like a real
 book. `dsearch demo` indexes it and runs one search:
+
+![dsearch demo: indexing the sample and finding the "How does it feel to be a problem?" passage](docs/demo.gif)
 
 ```
 $ dsearch demo
@@ -98,16 +115,6 @@ The page numbers are the ones printed on the page (`p. 20`), not the PDF's
 own count (`PDF 23`); the front matter has roman numerals and is cited by PDF
 page. The provenance of the sample is in `src/dsearch/data/README.md`.
 
-Installing with plain `pip` on Linux pulls the default `torch` wheel, which
-bundles CUDA libraries this tool never uses. To keep it small:
-
-```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"
-```
-
-`uv` does this automatically from the project's configuration.
-
 ```
 $ dsearch --help
 
@@ -115,12 +122,26 @@ $ dsearch --help
 
  Local-first semantic evidence search for academic PDFs. Retrieval only.
 
-╭─ Commands ───────────────────────────────────────────────────────────────────╮
-│ add     Index a PDF into your library.                                       │
-│ list    Show every source in your library.                                   │
-│ remove  Delete a source from your library.                                   │
-│ search  Find page-cited passages that answer a query.                        │
-╰──────────────────────────────────────────────────────────────────────────────╯
+╭─ Options ──────────────────────────────────────────────────────────────────╮
+│ --version                       Show version.                              │
+│ --verbose             -v        Log what the pipeline is doing.            │
+│ --quiet               -q        Drop informational notes; errors still     │
+│                                 print.                                     │
+│ --install-completion            Install completion for the current shell.  │
+│ --help                          Show this message and exit.                │
+╰────────────────────────────────────────────────────────────────────────────╯
+╭─ Commands ─────────────────────────────────────────────────────────────────╮
+│ add     Index one or more PDFs into your library.                          │
+│ list    Show every source in your library.                                 │
+│ edit    Change a source's author or title.                                 │
+│ remove  Delete a source from your library.                                 │
+│ search  Find page-cited passages that answer a query.                      │
+│ embed   Pre-embed a quality tier so later searches never have to wait.     │
+│ terms   Show the terms that set each chapter apart from its book.          │
+│ doctor  Show versions, paths, cached models, and the compute device.       │
+│ demo    Index the bundled public-domain sample and run one search.         │
+│ ui      Open the web UI in your browser. Needs the `ui` extra.             │
+╰────────────────────────────────────────────────────────────────────────────╯
 ```
 
 ---
@@ -183,7 +204,7 @@ eb815263  Fresh Fruit, Broken Bodies  Seth Holmes     29     249  fast, balanced
 7b4b8faf  Fresh Fruit, Broken Bodies  Seth Holmes     15     107  fast, balanced  2026-09-24
 ea63ed8d  Fresh Fruit, Broken Bodies  Seth Holmes     43     407  fast            2026-09-24
 
-3 source(s) in /Users/anthony/.dsearch
+3 source(s) in ~/.dsearch
 ```
 
 The Tiers column is read from the vector files on disk, so it always says
@@ -366,10 +387,10 @@ FIVE “Doctors Don’t Know Anything”  patients     114  p. 115 (PDF 5)
 $ dsearch doctor
 
 dsearch      0.2.0
-python       3.12.4  (/Users/you/.venv/bin/python)
+python       3.12.4  (~/.venv/bin/python)
 platform     macOS-15.0-arm64-arm-64bit
-library      /Users/you/.dsearch  —  5 source(s), 12.4 MB
-model cache  /Users/you/.cache/huggingface/hub
+library      ~/.dsearch  —  5 source(s), 12.4 MB
+model cache  ~/.cache/huggingface/hub
   fast       all-MiniLM-L6-v2  —  cached
   balanced   all-mpnet-base-v2  —  cached
   best       BAAI/bge-base-en-v1.5  —  not downloaded
@@ -492,40 +513,101 @@ rebuilds it.
 
 ---
 
+## Where things live
+
+| What | Where | Notes |
+|---|---|---|
+| Your library (chunks, vectors, metadata) | `~/.dsearch/` | Override with `DSEARCH_HOME`. Plain JSON and `.npy`; delete a source with `dsearch remove`, or the folder to start over. |
+| Embedding models | `~/.cache/huggingface/hub/` | Downloaded once per tier; shared with anything else that uses Hugging Face. `dsearch doctor` shows the path and which tiers are present. |
+| Measured embedding speed | `~/.dsearch/config.json` | Used for the time estimate before embedding a new tier. |
+| The bundled sample | inside the package | `dsearch demo` copies it to `./dsearch-demo/`. |
+
+Nothing leaves your machine except the model download. Set `HF_HUB_OFFLINE=1`
+once the models you use are cached and no network request is ever made.
+
+## Troubleshooting
+
+**Garbled characters or a `UnicodeEncodeError` on Windows.** The terminal's
+default code page cannot draw the result panels. Run with `PYTHONUTF8=1`
+(set it in your profile, or `setx PYTHONUTF8 1`), or use Windows Terminal.
+
+**"Could not load the fast model".** The first use of a tier needs the
+network for one download. If `HF_HUB_OFFLINE` is set, unset it for that run.
+Behind a proxy, set `HTTPS_PROXY`. `dsearch doctor` shows which tiers are
+already cached.
+
+**"has no text layer … looks like a scan".** The PDF is images. Run it
+through OCR first (for example `ocrmypdf in.pdf out.pdf`) and add the result.
+Built-in OCR is on the roadmap.
+
+**Install is huge on Linux.** You got the CUDA build of torch. See *Install*
+above for the CPU index, or use `uv`, which picks it automatically.
+
+**A result quotes the wrong page number.** The number shown is the folio
+printed on the page, read from the header or footer band. A book that prints
+none is cited by PDF page (`PDF p. 59`) so the two are never confused. Open
+an issue with the *Extraction problem* template; it asks for the details that
+make this fixable.
+
+**Something else.** `dsearch -v <command>` shows what the pipeline is doing;
+`dsearch doctor --json` is the first thing to paste into a bug report.
+
+## Uninstall
+
+```bash
+pipx uninstall dsearch        # or: uv tool uninstall dsearch
+rm -rf ~/.dsearch             # your library; models stay in the Hugging Face cache
+```
+
 ## Development
 
 ```bash
-uv sync --all-extras       # dev tools come from the `dev` dependency group
-uv run pytest              # 445 tests, no network required
-uv run ruff check .
-uv run ruff format --check .
+git clone https://github.com/73anthonyL/DeterministicSearch.git && cd DeterministicSearch
+uv sync --all-extras          # Python 3.11+; installs the locked dev tools
+uv run pre-commit install
+uv run pytest                 # offline, a few seconds
 ```
 
-`uv.lock` is committed so every clone and CI run resolves the same versions;
-`uv sync --locked` fails rather than silently updating it.
-
-The test suite generates its own tiny PDFs and stubs out the embedding model, so
-it runs offline in a couple of seconds.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the modules fit
+together. Each pull request is also a row in
+[docs/LEARNING.md](docs/LEARNING.md): the skill it exercised and what broke.
 
 ---
 
 ## Roadmap
 
-- ~~**Per-chapter key-term extraction**~~ — shipped as `dsearch terms`.
-- **A 2D embedding map** — project the stored chunk vectors down to two
-  dimensions and colour them by chapter, to see how a book's arguments cluster.
-  Each cluster can be labelled with its chapter's key terms.
+In order, each as its own pull request:
 
-The map reads the existing `chunks.jsonl` and `vectors_<tier>.npy`; the `Chunk`
-schema carries `chapter` and a `chunk_id` that doubles as the vector row index
-specifically so it needs no re-index, as key terms did not.
+- **A retrieval benchmark** — labelled queries over the bundled sample,
+  scored by recall, MRR, and nDCG in CI, so every change to ranking shows a
+  number before it ships.
+- **Better lexical matching** — a stemmed, stopword-aware BM25 persisted per
+  source instead of rebuilt on every query.
+- **A cross-encoder reranker, de-duplicated results, and a "weak evidence"
+  signal** — so the top passages are the best ones, adjacent overlapping
+  chunks collapse into one, and a query the library cannot answer says so.
+- **Any source** — EPUB, plain text and Markdown, HTML, and DOCX readers,
+  with citations that degrade gracefully (chapter or section instead of page);
+  OCR for scanned PDFs.
+- **Tougher PDF extraction** — folio sequencing, smarter dehyphenation,
+  two-column layouts, footnotes and captions, and skipping back matter.
+- ~~**Per-chapter key-term extraction**~~ — shipped as `dsearch terms`.
+- **A 2D embedding map** — the stored chunk vectors projected to two
+  dimensions and coloured by chapter, labelled with each chapter's key terms.
+
+The map and the benchmark read the existing `chunks.jsonl` and
+`vectors_<tier>.npy`; the `Chunk` schema carries `chapter` and a `chunk_id`
+that doubles as the vector row index specifically so later features need no
+re-index.
 
 ---
 
 ## Design notes
 
 Every decision the spec did not settle is written down, with its reasoning, in
-[DECISIONS.md](DECISIONS.md).
+[DECISIONS.md](DECISIONS.md). The data flow between modules, with the on-disk
+formats, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 
