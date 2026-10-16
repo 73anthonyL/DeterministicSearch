@@ -333,12 +333,8 @@ def list_sources() -> list[SourceMeta]:
     return load_library()
 
 
-def resolve_source(identifier: str) -> SourceMeta:
-    """Find one source by id prefix, filename, or title.
-
-    Raises SourceNotFoundError or AmbiguousSourceError rather than guessing,
-    because the caller may be about to delete what it resolves.
-    """
+def _matching_sources(identifier: str) -> list[SourceMeta]:
+    """Every source `identifier` names, by exact id, id prefix, filename, or title."""
     sources = load_library()
     if not sources:
         raise SourceNotFoundError("The library is empty. Add a PDF with `dsearch add`.")
@@ -346,7 +342,7 @@ def resolve_source(identifier: str) -> SourceMeta:
     needle = identifier.strip().lower()
     exact = [s for s in sources if s.source_id.lower() == needle]
     if exact:
-        return exact[0]
+        return exact
 
     matches = [
         s
@@ -358,10 +354,37 @@ def resolve_source(identifier: str) -> SourceMeta:
     ]
     if not matches:
         raise SourceNotFoundError(f"No source matches {identifier!r}.")
+    return matches
+
+
+def _ambiguous(identifier: str, matches: list[SourceMeta]) -> AmbiguousSourceError:
+    names = ", ".join(f"{s.short_id} ({s.title})" for s in matches)
+    return AmbiguousSourceError(f"{identifier!r} matches several sources: {names}")
+
+
+def resolve_source(identifier: str) -> SourceMeta:
+    """Find exactly one source by id prefix, filename, or title.
+
+    Raises SourceNotFoundError or AmbiguousSourceError rather than guessing,
+    because the caller may be about to delete what it resolves.
+    """
+    matches = _matching_sources(identifier)
     if len(matches) > 1:
-        names = ", ".join(f"{s.short_id} ({s.title})" for s in matches)
-        raise AmbiguousSourceError(f"{identifier!r} matches several sources: {names}")
+        raise _ambiguous(identifier, matches)
     return matches[0]
+
+
+def resolve_sources(identifier: str) -> list[SourceMeta]:
+    """Find the sources to search or embed: one file, or every file of one book.
+
+    A book added as one PDF per chapter shares a title across several sources,
+    and a reader naming that title means all of them. Anything else that
+    matches more than one source is still ambiguous.
+    """
+    matches = _matching_sources(identifier)
+    if len({s.title.strip().lower() for s in matches}) > 1:
+        raise _ambiguous(identifier, matches)
+    return matches
 
 
 def load_model(tier: str):

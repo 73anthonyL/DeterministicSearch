@@ -259,6 +259,27 @@ class TestSearch:
         assert result.exit_code == 1
         assert "Traceback" not in result.output
 
+    @pytest.fixture
+    def chapters(self, pdf_factory):
+        """One book added as two PDFs that share a title, as the README suggests."""
+        for n in (1, 2):
+            path = pdf_factory(name=f"ch{n}.pdf", pages=[f"{BODY} Chapter {n} knee."] * 2)
+            result = runner.invoke(app, ["add", str(path), "--title", "Shared Title"])
+            assert result.exit_code == 0, result.output
+
+    def test_filter_by_a_shared_title_searches_the_whole_book(self, chapters):
+        result = runner.invoke(app, ["search", "knee pain", "--source", "Shared Title", "-k", "4"])
+        assert result.exit_code == 0, result.output
+        assert "matches several" not in result.output
+        assert "ch1.pdf" not in result.output  # the panel names the title, not the file
+        assert result.output.count("Shared Title") >= 2
+
+    def test_filter_by_filename_within_a_shared_title(self, chapters):
+        result = runner.invoke(app, ["search", "knee pain", "--source", "ch2.pdf"])
+        assert result.exit_code == 0, result.output
+        assert "Chapter 2" in result.output
+        assert "Chapter 1" not in result.output
+
     def test_zero_k_is_rejected(self, added):
         result = runner.invoke(app, ["search", "knee", "--k", "0"])
         assert result.exit_code == 1
@@ -276,6 +297,29 @@ class TestSearch:
         # Nothing in a result may be text the tool wrote itself.
         result = runner.invoke(app, ["search", "foreman field", "--k", "1"])
         assert "foreman watched" in result.output.replace("\n", " ")
+
+
+class TestErrorText:
+    """Error messages carry filenames and user input, which must print as typed."""
+
+    def test_brackets_in_a_missing_pattern_are_not_markup(self, tmp_path):
+        result = runner.invoke(app, ["add", str(tmp_path / "[draft].pdf")])
+        assert result.exit_code == 1
+        assert "[draft].pdf" in result.output
+
+    def test_brackets_in_an_unknown_source_are_not_markup(self, added):
+        result = runner.invoke(app, ["edit", "[bold]x[/bold]", "--author", "A"])
+        assert result.exit_code == 1
+        assert "[bold]x[/bold]" in result.output
+
+    def test_brackets_in_a_per_file_add_error_are_not_markup(self, book, monkeypatch):
+        def boom(*args, **kwargs):
+            raise ValueError("bad [red]glyph[/red] table")
+
+        monkeypatch.setattr("dsearch.cli.index_add", boom)
+        result = runner.invoke(app, ["add", str(book)])
+        assert result.exit_code == 1
+        assert "bad [red]glyph[/red] table" in result.output
 
 
 class TestStaleIndex:

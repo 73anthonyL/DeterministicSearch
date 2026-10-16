@@ -519,11 +519,11 @@ def key_terms(
     ValueError for an unknown tier.
     """
     index._validate_tier(tier)
-    only = index.resolve_source(source) if source else None
+    only = {m.source_id for m in index.resolve_sources(source)} if source else None
 
     books = []
     for group in group_books(index.list_sources()):
-        if only and only.source_id not in {meta.source_id for meta in group}:
+        if only and only.isdisjoint(meta.source_id for meta in group):
             continue
         metas = {meta.source_id: meta for meta in group}
         chunks = {meta.source_id: index.load_chunks(meta.source_id) for meta in group}
@@ -535,6 +535,6 @@ def key_terms(
                 f"word counts alone. Run `dsearch embed --tier {tier}` to re-rank them."
             )
         if only:
-            book.chapters = [c for c in book.chapters if only.source_id in c.source_ids]
+            book.chapters = [c for c in book.chapters if not only.isdisjoint(c.source_ids)]
         books.append(book)
     return books

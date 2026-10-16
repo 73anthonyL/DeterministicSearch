@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import glob
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console, Group
+from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
@@ -37,7 +38,7 @@ from dsearch.index import (
     format_duration,
     home,
     is_stale,
-    resolve_source,
+    resolve_sources,
     tier_gap,
     upgrade_stale,
 )
@@ -73,9 +74,13 @@ errors = Console(stderr=True)
 _TIER_HELP = f"Embedding quality: {' | '.join(TIERS)}."
 
 
-def _fail(message: str) -> None:
-    """Print a clean error and exit 1, rather than a traceback."""
-    errors.print(f"[bold red]Error[/bold red] {message}")
+def _fail(message: str) -> NoReturn:
+    """Print a clean error and exit 1, rather than a traceback.
+
+    The message is escaped: it carries filenames and user input, and a path
+    such as `[draft].pdf` must print as typed rather than be read as markup.
+    """
+    errors.print(f"[bold red]Error[/bold red] {escape(message)}")
     raise typer.Exit(code=1)
 
 
@@ -163,8 +168,8 @@ def _note(message: str) -> None:
 
 
 def _scoped_sources(source: str | None) -> list[SourceMeta]:
-    """The sources a search or embed will touch: one named source, or all."""
-    return [resolve_source(source)] if source else index_list()
+    """The sources a search or embed will touch: one file, one book by title, or all."""
+    return resolve_sources(source) if source else index_list()
 
 
 def _upgrade_stale_sources(sources: list[SourceMeta]) -> list[SourceMeta]:
@@ -321,7 +326,7 @@ def add(
                 )
             except (FileNotFoundError, NoTextLayerError, ValueError) as exc:
                 failures += 1
-                errors.print(f"[bold red]Error[/bold red] {path}: {exc}")
+                errors.print(f"[bold red]Error[/bold red] {escape(str(path))}: {escape(str(exc))}")
                 continue
             _report_add(result, tier)
             warning = result.warning or warning
@@ -390,7 +395,10 @@ def remove(
 def search(
     query: Annotated[str, typer.Argument(help="A question, a phrase, or a whole paragraph.")],
     k: Annotated[int, typer.Option("--k", "-k", help="How many passages to return.")] = DEFAULT_K,
-    source: Annotated[str | None, typer.Option(help="Limit to one source.")] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(help="Limit to one source, or by title to every file of one book."),
+    ] = None,
     tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
     yes: Annotated[
         bool, typer.Option("--yes", "-y", help="Embed missing tiers without asking.")
@@ -434,7 +442,7 @@ def embed(
 ) -> None:
     """Pre-embed a quality tier so later searches at it never have to wait."""
     try:
-        scoped = [resolve_source(name) for name in source] if source else index_list()
+        scoped = [m for name in source for m in resolve_sources(name)] if source else index_list()
         scoped = _upgrade_stale_sources(scoped)
         gap = tier_gap(tier, scoped)
     except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
@@ -482,7 +490,9 @@ def _terms_table(book: BookTerms) -> Table:
 
 @app.command()
 def terms(
-    source: Annotated[str | None, typer.Option(help="Limit to one source's chapters.")] = None,
+    source: Annotated[
+        str | None, typer.Option(help="Limit to one source's chapters, or one book's by title.")
+    ] = None,
     tier: Annotated[str, typer.Option(help=_TIER_HELP)] = DEFAULT_TIER,
     top: Annotated[int, typer.Option(help="Terms to show per chapter.")] = DEFAULT_TOP,
     no_rerank: Annotated[

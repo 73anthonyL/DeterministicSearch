@@ -20,7 +20,7 @@ from dsearch.index import (
     list_sources,
     load_chunks,
     load_vectors,
-    resolve_source,
+    resolve_sources,
 )
 
 # Above this many words a query is treated as a paragraph of thinking rather
@@ -105,11 +105,12 @@ def tokenize(text: str) -> list[str]:
 def load_corpus(tier: str = DEFAULT_TIER, source: str | None = None) -> Corpus:
     """Load chunks and vectors for the whole library, or one source.
 
-    A source that has no vectors at this tier is skipped and named in
-    `Corpus.skipped` rather than failing the search: one un-upgraded book
-    should not block the rest of the library.
+    `source` may name one file or, by title, every file of one book. A source
+    that has no vectors at this tier is skipped and named in `Corpus.skipped`
+    rather than failing the search: one un-upgraded book should not block the
+    rest of the library.
     """
-    metas = [resolve_source(source)] if source else list_sources()
+    metas = resolve_sources(source) if source else list_sources()
 
     corpus = Corpus()
     blocks: list[np.ndarray] = []

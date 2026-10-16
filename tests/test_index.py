@@ -274,6 +274,36 @@ class TestResolveSource:
             index.resolve_source("Shared Title")
 
 
+class TestResolveSources:
+    """A title shared by several files names the whole book, not an error."""
+
+    @pytest.fixture
+    def chapters(self, pdf_factory):
+        one = index.add(pdf_factory(name="ch1.pdf", pages=[f"{BODY} One."] * 2), title="Book").meta
+        two = index.add(pdf_factory(name="ch2.pdf", pages=[f"{BODY} Two."] * 2), title="Book").meta
+        return one, two
+
+    def test_a_shared_title_returns_every_file_of_the_book(self, chapters):
+        found = index.resolve_sources("book")
+        assert {m.source_id for m in found} == {m.source_id for m in chapters}
+
+    def test_a_filename_still_returns_one_source(self, chapters):
+        one, _ = chapters
+        assert [m.source_id for m in index.resolve_sources("ch2.pdf")] != [one.source_id]
+        assert len(index.resolve_sources("ch1")) == 1
+
+    def test_different_titles_stay_ambiguous(self, chapters, pdf_factory):
+        # Every id here starts with the same prefix only by construction of the
+        # needle: an empty prefix matches all, and the titles differ.
+        index.add(pdf_factory(name="other.pdf", pages=[f"{BODY} Three."] * 2), title="Other")
+        with pytest.raises(index.AmbiguousSourceError):
+            index.resolve_sources("")
+
+    def test_unknown_identifier(self, chapters):
+        with pytest.raises(index.SourceNotFoundError):
+            index.resolve_sources("no-such-book")
+
+
 class TestRemove:
     def test_deletes_folder_and_library_row(self, book):
         meta = index.add(book).meta
