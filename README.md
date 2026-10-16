@@ -17,16 +17,34 @@ cached; after that, searching needs no network at all.
 
 ## Install
 
-Three commands, from a clean clone:
+Python 3.11, 3.12, or 3.13. Until the first PyPI release, install from the
+repository; the `ui` extra adds the web interface:
+
+```bash
+pipx install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"
+# or:  uv tool install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"
+```
+
+From a clone, for development:
 
 ```bash
 git clone https://github.com/73anthonyL/DeterministicSearch.git && cd DeterministicSearch
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+uv sync --all-extras          # creates .venv with the exact locked versions
+uv run dsearch --help         # or: source .venv/bin/activate
 ```
 
-Python 3.11 or newer. The first `dsearch add` downloads the embedding model
-(about 90 MB for the default `fast` tier); everything after that is offline.
+The first `dsearch add` downloads the embedding model (about 90 MB for the
+default `fast` tier); everything after that is offline.
+
+Installing with plain `pip` on Linux pulls the default `torch` wheel, which
+bundles CUDA libraries this tool never uses. To keep it small:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"
+```
+
+`uv` does this automatically from the project's configuration.
 
 ```
 $ dsearch --help
@@ -295,7 +313,8 @@ Accepts an id prefix, a filename, or a title.
 ## The web UI
 
 ```bash
-streamlit run src/dsearch/app.py
+dsearch ui              # needs the `ui` extra; opens a browser tab
+dsearch ui --headless --port 8600
 ```
 
 Drag one or more PDFs onto the sidebar, pick a quality tier, and watch the
@@ -379,10 +398,14 @@ rebuilds it.
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest          # 427 tests, no network required
-ruff check .
+uv sync --all-extras       # dev tools come from the `dev` dependency group
+uv run pytest              # 445 tests, no network required
+uv run ruff check .
+uv run ruff format --check .
 ```
+
+`uv.lock` is committed so every clone and CI run resolves the same versions;
+`uv sync --locked` fails rather than silently updating it.
 
 The test suite generates its own tiny PDFs and stubs out the embedding model, so
 it runs offline in a couple of seconds.

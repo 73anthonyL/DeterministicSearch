@@ -10,13 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
-          cache: pip
-      # CPU-only torch first, so sentence-transformers does not pull the CUDA wheels.
-      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-      - run: pip install -e ".[dev]"
-      - run: ruff check .
-      - run: ruff format --check .
-      - run: pytest -q
+          enable-cache: true
+      - run: uv python install 3.11
+      # --locked fails if uv.lock is out of date with pyproject.toml, so the
+      # lockfile can never silently drift. The lock pins CPU-only torch on Linux.
+      - run: uv sync --locked --all-extras --python 3.11
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q

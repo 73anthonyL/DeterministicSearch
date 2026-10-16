@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `dsearch ui` opens the web UI from any install, including a wheel; it needs
+  the new `ui` extra (`pip install 'dsearch[ui]'`).
+- `py.typed`, so type checkers read the package's annotations.
+
+### Changed
+
+- Streamlit is now optional. The core install no longer pulls in pandas and
+  pyarrow for people who only use the command line.
+- The version is declared once, in `pyproject.toml`, and read from package
+  metadata at runtime.
+- Development dependencies moved from the `dev` extra to a PEP 735 dependency
+  group; `uv sync` installs them, and `uv.lock` is committed. On Linux, uv
+  installs CPU-only torch from the PyTorch index.
+
 ### Fixed
 
 - Searching, embedding, or listing terms with `--source <title>` now selects

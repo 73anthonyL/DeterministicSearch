@@ -69,7 +69,7 @@ class TestHelpAndVersion:
     def test_help_lists_every_command(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        for command in ("add", "edit", "list", "remove", "search", "terms"):
+        for command in ("add", "edit", "list", "remove", "search", "terms", "ui"):
             assert command in result.output
 
     def test_version(self):
@@ -297,6 +297,29 @@ class TestSearch:
         # Nothing in a result may be text the tool wrote itself.
         result = runner.invoke(app, ["search", "foreman field", "--k", "1"])
         assert "foreman watched" in result.output.replace("\n", " ")
+
+
+class TestUi:
+    def test_launches_streamlit_on_the_packaged_app(self, monkeypatch):
+        calls: list[list[str]] = []
+        monkeypatch.setattr("dsearch.cli.subprocess.call", lambda cmd: calls.append(cmd) or 0)
+        result = runner.invoke(app, ["ui", "--port", "8600", "--headless"])
+        assert result.exit_code == 0, result.output
+        (command,) = calls
+        assert command[1:4] == ["-m", "streamlit", "run"]
+        assert command[4].endswith("app.py")
+        assert command[5:] == ["--server.port", "8600", "--server.headless", "true"]
+
+    def test_streamlit_exit_code_is_passed_through(self, monkeypatch):
+        monkeypatch.setattr("dsearch.cli.subprocess.call", lambda cmd: 3)
+        assert runner.invoke(app, ["ui"]).exit_code == 3
+
+    def test_missing_streamlit_is_a_one_line_hint(self, monkeypatch):
+        monkeypatch.setattr("dsearch.cli.importlib.util.find_spec", lambda name: None)
+        result = runner.invoke(app, ["ui"])
+        assert result.exit_code == 1
+        assert "dsearch[ui]" in result.output
+        assert "Traceback" not in result.output
 
 
 class TestErrorText:

@@ -490,3 +490,37 @@ page. What follows is what that left open.
   redo but slow to rebuild, and the button sat beside the library list.
 - **The Streamlit script is tested with `AppTest`**, not only its helpers. The
   source-filter bug lived in widget wiring that no helper test could reach.
+
+## Packaging (v0.2)
+
+- **The version lives once, in `pyproject.toml`, and `__version__` reads it
+  from package metadata.** The alternative, `hatch-vcs` deriving it from the
+  git tag, needs full history in every checkout and gives dev builds names
+  like `0.2.0.dev3+g1a2b3c`. A static field means `uv version --bump` edits
+  one line and the release workflow can assert that the tag matches it. A
+  checkout that was never installed reports `0+unknown` rather than lying.
+- **Streamlit is an extra (`dsearch[ui]`), not a core dependency.** It brings
+  pandas and pyarrow, which the CLI never imports; a reader who only wants
+  `dsearch search` should not install a data-frame stack for it.
+- **`dsearch ui` launches Streamlit in a subprocess on the packaged `app.py`.**
+  `streamlit run src/dsearch/app.py` only works from a clone; a wheel has no
+  `src/`. The script is located with `importlib.resources`, so the command
+  works from any install. A subprocess rather than Streamlit's bootstrap
+  function: that function is private, its signature has changed between
+  releases, and a child process keeps Ctrl-C and the event loop Streamlit's.
+- **uv, with `uv.lock` committed and a PEP 735 `dev` dependency group.** The
+  lock pins what CI and every clone install, so a failing test cannot be a
+  version drift; the published wheel is unaffected, since metadata carries
+  only the floors. A dependency *group* rather than a `dev` extra keeps
+  development tools out of the package's published metadata.
+- **CPU-only torch on Linux via `[tool.uv.sources]`.** The default Linux wheel
+  bundles CUDA libraries; the CPU index cuts a fresh install by gigabytes and
+  replaces the hand-written `pip install torch --index-url` step in CI. macOS
+  and Windows wheels on PyPI are already CPU-only, so the source is scoped to
+  Linux with a marker.
+- **No upper bounds on runtime dependencies.** Upper bounds on a library make
+  it the thing that breaks every other resolver; reproducibility comes from
+  the lockfile instead. A bound is added only after a real break, with its
+  reason here.
+- **Python 3.11 to 3.13 are declared; 3.14 is not yet.** The lock resolves
+  for 3.14, but nothing exercises it until the CI matrix does.
