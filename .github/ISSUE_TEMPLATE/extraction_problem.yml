@@ -1,0 +1,48 @@
+name: Extraction problem
+description: A PDF came out with mangled text, wrong page numbers, or wrong chapter titles.
+labels: ["type: bug", "area: extract"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Extraction heuristics (page numbers, running heads, chapter titles, ligatures)
+        are tuned on a handful of books and will meet typesetting they have never seen.
+        The details below are what makes such a report fixable.
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What is wrong
+      multiple: true
+      options:
+        - "Quoted text has missing or garbled characters (ligatures, accents, symbols)"
+        - "Words joined or split wrongly (hyphenation, letter-spaced headings)"
+        - "Page number is wrong or shown as 'PDF p.'"
+        - "Chapter title is wrong or missing"
+        - "Running head, footnote, caption, or table text spliced into a sentence"
+        - "'No text layer' error on a PDF that has selectable text"
+        - "Other"
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: One concrete example
+      description: What `dsearch search` showed, and what the page actually says. Quote both.
+    validations:
+      required: true
+  - type: textarea
+    id: pdf_info
+    attributes:
+      label: PDF producer and pymupdf version
+      description: |
+        Run and paste the output of:
+        `python -c "import pymupdf,sys;d=pymupdf.open(sys.argv[1]);print(pymupdf.__doc__);print(d.metadata);print(d.page_count,'pages, toc entries:',len(d.get_toc()))" your.pdf`
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: page
+    attributes:
+      label: A sample page
+      options:
+        - label: I can attach one page of the PDF, redacted if needed, that shows the problem (please do not attach whole copyrighted books).

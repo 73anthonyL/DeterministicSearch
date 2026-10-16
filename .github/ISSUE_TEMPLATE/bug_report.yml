@@ -1,0 +1,32 @@
+name: Bug report
+description: Something did not work as documented.
+labels: ["type: bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got. Paste the full terminal output, including any error line.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: "Paste the output of `dsearch --version`, `python --version`, and your OS. (A future `dsearch doctor` will print all of this.)"
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How was it installed
+      options: [pipx or uv tool, pip in a venv, from a clone with uv sync, other]
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: A minimal PDF that reproduces it (public-domain or self-made only), a screenshot of the web UI, or what you already tried.

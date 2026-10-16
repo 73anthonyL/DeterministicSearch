@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: If you use dsearch in academic work, please cite it as below.
+type: software
+title: "dsearch: local-first semantic evidence search for academic PDFs"
+authors:
+  - family-names: Lu
+    given-names: Anthony
+repository-code: https://github.com/73anthonyL/DeterministicSearch
+license: MIT
+version: 0.1.0
+date-released: "2026-10-05"
+keywords:
+  - semantic search
+  - information retrieval
+  - citations
+  - pdf

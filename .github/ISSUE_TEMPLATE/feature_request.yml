@@ -1,0 +1,22 @@
+name: Feature request
+description: Something dsearch should do that it does not.
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, in terms of your own reading and writing, and where the tool stops short.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to see
+      description: The command, option, or screen you imagine. A sketch of the output helps more than an implementation plan.
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Fit with the project
+      description: |
+        dsearch never generates text and never calls an LLM; every result is a verbatim span with a page. If the idea bends either rule, say how.
