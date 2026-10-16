@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/73anthonyL/DeterministicSearch/security/advisories/new
+    about: Report privately; see SECURITY.md.
+  - name: How does it work?
+    url: https://github.com/73anthonyL/DeterministicSearch#how-it-works
+    about: The README explains extraction, chunking, hybrid retrieval, and citations.

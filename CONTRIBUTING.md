@@ -37,9 +37,21 @@ then builds the wheel and installs it into an empty environment.
   hook refuses files over 1 MB.
 - No AI-attribution trailers on commits.
 
-## Reporting an extraction problem
+## Issues and labels
 
-If a PDF comes out with mangled text, missing page numbers, or wrong chapter
-titles, open an issue with the PDF's producer (`python -c "import pymupdf;
-print(pymupdf.open('file.pdf').metadata)"`), the `pymupdf` version, and if
-possible a single redacted page that shows the problem.
+Open an issue from one of the templates: **Bug report**, **Extraction
+problem** (a PDF that comes out mangled; the template asks for the details
+that make it fixable), or **Feature request**. Security problems go through
+the private form linked in `SECURITY.md`, never a public issue.
+
+Labels: `type: bug | feature | docs | chore` says what kind of change;
+`area: extract | chunk | index | search | cite | terms | cli | ui | ci` says
+where. `good first issue` marks something self-contained for a newcomer.
+Release notes are grouped by these labels (`.github/release.yml`).
+
+## Releases
+
+Maintainer only. Bump the version in `pyproject.toml`, move the `Unreleased`
+section of `CHANGELOG.md` under the new version, merge that as
+`chore(release): x.y.z`, and push a `vx.y.z` tag. The release workflow
+builds, publishes, and writes the GitHub Release.

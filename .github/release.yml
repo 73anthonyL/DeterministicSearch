@@ -1,0 +1,19 @@
+# Categories for GitHub's "Generate release notes" button. The release
+# workflow builds its notes from conventional commits; this keeps the button
+# sensible for anyone who uses it instead.
+changelog:
+  exclude:
+    labels:
+      - dependencies
+      - skip-changelog
+  categories:
+    - title: Breaking changes
+      labels: [breaking]
+    - title: Features
+      labels: ["type: feature"]
+    - title: Fixes
+      labels: ["type: bug"]
+    - title: Documentation
+      labels: ["type: docs"]
+    - title: Other changes
+      labels: ["*"]

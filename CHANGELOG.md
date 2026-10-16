@@ -20,6 +20,10 @@ All notable changes to this project are documented here. The format follows
   and updated by Dependabot. Pull request titles must be conventional commits.
 - A pre-commit configuration runs the same checks locally; see
   `CONTRIBUTING.md`.
+- Community files: a code of conduct, a security policy with private
+  reporting, issue templates (bug, extraction problem, feature), a pull
+  request template, `CODEOWNERS`, release-notes categories, and a
+  `CITATION.cff`.
 - Streamlit is now optional. The core install no longer pulls in pandas and
   pyarrow for people who only use the command line.
 - The version is declared once, in `pyproject.toml`, and read from package
