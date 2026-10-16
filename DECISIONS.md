@@ -646,3 +646,24 @@ page. What follows is what that left open.
   middle of dsearch's own output. `setdefault` on their environment switches
   respects a user who has configured them; `dsearch -v` remains the way to
   see what is happening.
+
+## Documentation (v0.2)
+
+- **The README's command list is tested.** The old `--help` block drifted
+  within a week of being written (three commands missing). `tests/test_docs.py`
+  reads Typer's registered commands and asserts each appears in the README's
+  help block and has a usage section, and that no personal path is in the
+  file. Documentation that can go stale silently is documentation that will.
+- **The demo GIF is recorded from a tape, not by hand.** `docs/demo.tape` is
+  a VHS script against a scratch library, so the recording can be redone
+  after any output change with one command, and never touches `~/.dsearch`.
+  It shows only `dsearch demo`: one command, under 15 seconds, under the 1 MB
+  large-file guard. Everything else the README shows as text, which is
+  searchable and copyable, as a GIF is not.
+- **Architecture lives in `docs/`, not in the README.** The README is for
+  someone deciding whether to install; `ARCHITECTURE.md` is for someone
+  about to change the code. The Mermaid diagram renders on GitHub without a
+  build step, which is why it is not an image.
+- **A learning log, one row per pull request.** The repository is also a
+  record of what was learned building it; the last column, "what broke and
+  how it was found", is the part worth keeping and the part no changelog has.

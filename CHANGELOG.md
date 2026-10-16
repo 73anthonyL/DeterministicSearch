@@ -33,6 +33,12 @@ All notable changes to this project are documented here. The format follows
   and updated by Dependabot. Pull request titles must be conventional commits.
 - A pre-commit configuration runs the same checks locally; see
   `CONTRIBUTING.md`.
+- `docs/ARCHITECTURE.md` (the pipeline, data model, and on-disk layout, with
+  a diagram) and `docs/LEARNING.md` (one row per pull request: the skill, the
+  interview-length summary, and what broke).
+- README: badges, PyPI install, a recorded demo (`docs/demo.tape`, replayable
+  with VHS), a current `--help`, where files live, troubleshooting, and
+  uninstall; a test keeps the command list in step with the CLI.
 - Community files: a code of conduct, a security policy with private
   reporting, issue templates (bug, extraction problem, feature), a pull
   request template, `CODEOWNERS`, release-notes categories, and a
