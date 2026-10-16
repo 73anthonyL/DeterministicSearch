@@ -325,7 +325,7 @@ class TestUi:
         monkeypatch.setattr("dsearch.cli.importlib.util.find_spec", lambda name: None)
         result = runner.invoke(app, ["ui"])
         assert result.exit_code == 1
-        assert "dsearch[ui]" in result.output
+        assert "deterministic-search[ui]" in result.output
         assert "Traceback" not in result.output
 
 

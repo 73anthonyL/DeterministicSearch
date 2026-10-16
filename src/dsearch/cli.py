@@ -625,9 +625,8 @@ def _doctor_report(info: dict) -> None:
     table.add_row("device", models["device"])
     for name, version in info["packages"].items():
         table.add_row(name, version or "[dim]not installed[/dim]")
-    table.add_row(
-        "web ui", "available" if info["ui_available"] else "[dim]pip install 'dsearch[ui]'[/dim]"
-    )
+    ui_hint = "[dim]pip install 'deterministic-search[ui]'[/dim]"
+    table.add_row("web ui", "available" if info["ui_available"] else ui_hint)
     console.print(table)
 
 
@@ -701,8 +700,8 @@ def ui(
     """Open the web UI in your browser. Needs the `ui` extra."""
     if importlib.util.find_spec("streamlit") is None:
         _fail(
-            "The web UI needs streamlit. Install it with: pipx install 'dsearch[ui]' "
-            "(or: pip install 'dsearch[ui]')."
+            "The web UI needs streamlit. Install it with: "
+            "pipx install 'deterministic-search[ui]' (or: pip install 'deterministic-search[ui]')."
         )
     # The app ships inside the package, so this works from a wheel as well as a
     # checkout. A subprocess rather than streamlit's bootstrap API: that API is

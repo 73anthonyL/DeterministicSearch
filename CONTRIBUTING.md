@@ -51,7 +51,26 @@ Release notes are grouped by these labels (`.github/release.yml`).
 
 ## Releases
 
-Maintainer only. Bump the version in `pyproject.toml`, move the `Unreleased`
-section of `CHANGELOG.md` under the new version, merge that as
-`chore(release): x.y.z`, and push a `vx.y.z` tag. The release workflow
-builds, publishes, and writes the GitHub Release.
+Maintainer only. The package is published as `deterministic-search`; the
+command and the import stay `dsearch`. Publishing uses PyPI's trusted
+publishing: the release workflow proves its identity to the index with an
+OIDC token, and no API token exists anywhere.
+
+1. **Rehearse.** Set a pre-release version (`uv version 0.2.0rc1`), merge it,
+   and run the *Release* workflow by hand with target `testpypi`. It builds,
+   uploads to TestPyPI, installs the upload into an empty environment, and
+   runs `dsearch demo`. An index never accepts the same version twice, so a
+   failed rehearsal means `rc2`, not a retry.
+2. **Release PR.** `uv version x.y.z`; move the `Unreleased` section of
+   `CHANGELOG.md` under `## [x.y.z] - YYYY-MM-DD`; update `version` and
+   `date-released` in `CITATION.cff`. Merge as `chore(release): x.y.z`.
+3. **Tag.** `git switch main && git pull --ff-only && git tag -a vx.y.z -m "vx.y.z"
+   && git push origin vx.y.z`. The workflow checks that the tag and
+   `pyproject.toml` agree, publishes to TestPyPI, and stops at the `pypi`
+   environment for approval.
+4. **Approve.** Review the TestPyPI job's output, then approve the `pypi`
+   deployment under the workflow run. The workflow publishes to PyPI, creates
+   the GitHub Release with notes from the commits since the previous tag
+   (`cliff.toml`), and attaches the wheel and sdist.
+5. **Confirm.** `pipx install "deterministic-search[ui]==x.y.z"` on a clean
+   machine; `dsearch demo`.
