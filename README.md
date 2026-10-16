@@ -32,8 +32,7 @@ pipx install "deterministic-search[ui]"   # or: uv tool install "deterministic-s
 ```
 
 `pip install "deterministic-search[ui]"` inside a virtual environment works
-too. Until the first PyPI release lands, use the repository instead:
-`pipx install "deterministic-search[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"`.
+too.
 
 The first `dsearch add` downloads the embedding model (about 90 MB for the
 default `fast` tier); everything after that is offline.

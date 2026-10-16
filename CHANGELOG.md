@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-16
+
 ### Added
 
 - `dsearch demo` indexes a bundled public-domain sample (the Forethought and
@@ -99,5 +101,6 @@ The one-day build, plus key terms and continuous integration.
 - A Streamlit web UI over the same functions.
 - GitHub Actions running ruff and pytest on pushes and pull requests.
 
-[Unreleased]: https://github.com/73anthonyL/DeterministicSearch/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/73anthonyL/DeterministicSearch/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/73anthonyL/DeterministicSearch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/73anthonyL/DeterministicSearch/releases/tag/v0.1.0

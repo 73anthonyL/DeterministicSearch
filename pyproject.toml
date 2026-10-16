@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Published as deterministic-search (PyPI treats `dsearch` and the existing
 # `d-search` as the same name); the command and the import are still dsearch.
 name = "deterministic-search"
-version = "0.2.0rc1"
+version = "0.2.0"
 description = "Local-first semantic evidence search for academic PDFs. Retrieval only — it never generates text."
 readme = "README.md"
 license = { file = "LICENSE" }

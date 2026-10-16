@@ -7,8 +7,8 @@ authors:
     given-names: Anthony
 repository-code: https://github.com/73anthonyL/DeterministicSearch
 license: MIT
-version: 0.1.0
-date-released: "2026-10-05"
+version: 0.2.0
+date-released: "2026-10-16"
 keywords:
   - semantic search
   - information retrieval
