@@ -1,8 +1,12 @@
-"""The `dsearch` command line: add, list, remove, search, terms."""
+"""The `dsearch` command line: add, list, remove, search, terms, ui."""
 
 from __future__ import annotations
 
 import glob
+import importlib.resources
+import importlib.util
+import subprocess
+import sys
 from pathlib import Path
 from typing import Annotated, NoReturn
 
@@ -528,6 +532,32 @@ def terms(
                 "terms are ranked by frequency."
             )
         console.print(_terms_table(book))
+
+
+@app.command()
+def ui(
+    port: Annotated[int | None, typer.Option(help="Port to serve on (default 8501).")] = None,
+    headless: Annotated[
+        bool, typer.Option("--headless", help="Do not open a browser tab.")
+    ] = False,
+) -> None:
+    """Open the web UI in your browser. Needs the `ui` extra."""
+    if importlib.util.find_spec("streamlit") is None:
+        _fail(
+            "The web UI needs streamlit. Install it with: pipx install 'dsearch[ui]' "
+            "(or: pip install 'dsearch[ui]')."
+        )
+    # The app ships inside the package, so this works from a wheel as well as a
+    # checkout. A subprocess rather than streamlit's bootstrap API: that API is
+    # private and has changed shape between releases, and a child process keeps
+    # Ctrl-C and the event loop entirely Streamlit's own.
+    with importlib.resources.as_file(importlib.resources.files("dsearch") / "app.py") as script:
+        command = [sys.executable, "-m", "streamlit", "run", str(script)]
+        if port is not None:
+            command += ["--server.port", str(port)]
+        if headless:
+            command += ["--server.headless", "true"]
+        raise typer.Exit(code=subprocess.call(command))
 
 
 def _version_callback(value: bool) -> None:

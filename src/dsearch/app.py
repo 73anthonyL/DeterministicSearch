@@ -1,7 +1,7 @@
 """Streamlit front end for dsearch.
 
 A thin wrapper over the same functions the CLI calls — no retrieval logic lives
-here. Run it with:
+here. Run it with `dsearch ui`, or directly:
 
     streamlit run src/dsearch/app.py
 """
