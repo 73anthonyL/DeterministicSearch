@@ -1,7 +1,7 @@
 # dsearch
 
 [![CI](https://github.com/73anthonyL/DeterministicSearch/actions/workflows/ci.yml/badge.svg)](https://github.com/73anthonyL/DeterministicSearch/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/dsearch.svg)](https://pypi.org/project/dsearch/)
+[![PyPI](https://img.shields.io/pypi/v/deterministic-search.svg)](https://pypi.org/project/deterministic-search/)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Checked with pyright](https://microsoft.github.io/pyright/img/pyright_badge.svg)](https://github.com/microsoft/pyright)
@@ -24,15 +24,16 @@ cached; after that, searching needs no network at all.
 ## Install
 
 Python 3.11, 3.12, or 3.13. One command; the `ui` extra adds the web
-interface:
+interface. The package is named `deterministic-search` on PyPI and installs
+the `dsearch` command:
 
 ```bash
-pipx install "dsearch[ui]"          # or: uv tool install "dsearch[ui]"
+pipx install "deterministic-search[ui]"   # or: uv tool install "deterministic-search[ui]"
 ```
 
-`pip install "dsearch[ui]"` inside a virtual environment works too. Until the
-first PyPI release lands, use the repository instead:
-`pipx install "dsearch[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"`.
+`pip install "deterministic-search[ui]"` inside a virtual environment works
+too. Until the first PyPI release lands, use the repository instead:
+`pipx install "deterministic-search[ui] @ git+https://github.com/73anthonyL/DeterministicSearch"`.
 
 The first `dsearch add` downloads the embedding model (about 90 MB for the
 default `fast` tier); everything after that is offline.
@@ -45,7 +46,7 @@ uses. Install the CPU build first:
 
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install "dsearch[ui]"
+pip install "deterministic-search[ui]"
 ```
 
 `uv` does this automatically from the project's configuration.

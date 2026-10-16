@@ -22,11 +22,17 @@ All notable changes to this project are documented here. The format follows
   and embedding throughput to stderr; `-q/--quiet` drops informational notes.
 - Shell completion: `dsearch --install-completion`.
 - `dsearch ui` opens the web UI from any install, including a wheel; it needs
-  the new `ui` extra (`pip install 'dsearch[ui]'`).
+  the new `ui` extra (`pip install 'deterministic-search[ui]'`).
 - `py.typed`, so type checkers read the package's annotations.
 
 ### Changed
 
+- The package is published on PyPI as `deterministic-search`; the command
+  and the import stay `dsearch`. (PyPI treats `dsearch` and the unrelated,
+  existing `d-search` as the same name.)
+- Releases are built and published by a workflow on a `v*` tag, through
+  PyPI's trusted publishing: TestPyPI first, an install-and-demo check of
+  that upload, a reviewer's approval, then PyPI and the GitHub Release.
 - Continuous integration now runs on Linux, macOS, and Windows across Python
   3.11 to 3.13, type-checks with pyright, checks spelling, enforces a coverage
   floor, and builds and smoke-tests the wheel. Actions are pinned to commits

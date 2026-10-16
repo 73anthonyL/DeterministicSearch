@@ -3,7 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "dsearch"
+# Published as deterministic-search (PyPI treats `dsearch` and the existing
+# `d-search` as the same name); the command and the import are still dsearch.
+name = "deterministic-search"
 version = "0.1.0"
 description = "Local-first semantic evidence search for academic PDFs. Retrieval only — it never generates text."
 readme = "README.md"
@@ -39,12 +41,13 @@ ui = ["streamlit>=1.35"]
 
 [dependency-groups]
 dev = [
-    "dsearch[ui]",
+    "deterministic-search[ui]",
     "codespell>=2.3",
     "pre-commit>=4.0",
     "pyright>=1.1.390",
     "pytest>=8.0",
     "pytest-cov>=6.0",
+    "pyyaml>=6.0",  # tests read the workflow files
     "ruff>=0.5",
 ]
 

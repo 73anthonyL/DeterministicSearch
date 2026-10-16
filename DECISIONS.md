@@ -667,3 +667,47 @@ page. What follows is what that left open.
 - **A learning log, one row per pull request.** The repository is also a
   record of what was learned building it; the last column, "what broke and
   how it was found", is the part worth keeping and the part no changelog has.
+
+## Release engineering (v0.2)
+
+- **Published as `deterministic-search`, not `dsearch`.** PyPI refuses a
+  name that is "too similar" to an existing project, and its check strips
+  dots, dashes, and underscores before comparing, so `dsearch` collides with
+  the unrelated `d-search` (2023, a web-data tool) for good. The distribution
+  name is the one thing that had to change: the command, the import, and the
+  library folder are still `dsearch`, as with `beautifulsoup4`/`bs4` or
+  `pillow`/`PIL`. The alternative, renaming the tool, would have cost more
+  than a one-line explanation in the README.
+- **Trusted publishing, no API tokens.** The release workflow authenticates
+  to both indexes with GitHub's OIDC token, which PyPI checks against the
+  registered publisher (repository, workflow file name, environment name). A
+  token would be a long-lived secret that any workflow in the repository
+  could read; the OIDC identity cannot be copied out of the job that holds
+  it. The environment names are part of the identity, which is why `pypi`
+  and `testpypi` are separate environments and not one with two URLs.
+- **TestPyPI is a gate, not a rehearsal space only.** Every release passes
+  through TestPyPI first, and the workflow installs that upload into an empty
+  environment and runs `dsearch demo` before PyPI is touched. The dependencies
+  come from PyPI during that install; TestPyPI's copies of `torch` or `numpy`
+  are stale or missing, and the point is to test this package's files, not
+  the index.
+- **A human approves the `pypi` environment.** A tag starts the workflow, but
+  nothing reaches PyPI until the maintainer approves the deployment after
+  looking at the TestPyPI job. Tags can be pushed by mistake; an upload
+  cannot be undone (a yanked version still exists).
+- **The tag must equal the version.** `build` fails if `v$(uv version --short)`
+  differs from the tag name, so `v0.2.0` can never publish `0.1.0`. The
+  version is still declared only once, in `pyproject.toml`.
+- **Release notes come from git-cliff; the changelog is written by hand.**
+  They serve different readers. `CHANGELOG.md` says what changed for a user
+  in the user's terms, grouped by Keep a Changelog, and is edited in every
+  pull request. The GitHub Release notes are a commit-level record generated
+  from the squash commits since the previous tag (`cliff.toml`), which is
+  possible because the pull-request title check keeps every commit on `main`
+  conventional. Neither is derived from the other, so neither can rot the
+  other.
+- **The workflow is tested.** `tests/test_release.py` reads `release.yml`
+  and asserts the parts that would fail silently at publish time: the
+  package name matches `pyproject.toml`, the publishing jobs use their named
+  environments with `id-token: write` and no password, PyPI depends on
+  TestPyPI and runs only from a tag, and every action is pinned to a commit.
