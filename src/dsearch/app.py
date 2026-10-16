@@ -8,6 +8,7 @@ here. Run it with:
 
 from __future__ import annotations
 
+import html
 import tempfile
 from pathlib import Path
 
@@ -32,7 +33,7 @@ from dsearch.index import (
     format_duration,
     list_sources,
     remove,
-    resolve_source,
+    resolve_sources,
     tier_gap,
     upgrade_stale,
 )
@@ -64,11 +65,16 @@ def _truncate(text: str, limit: int = NEIGHBOUR_CHARS) -> str:
 
 
 def _dim(text: str) -> str:
-    return f"<span style='color:{DIM}'>{text}</span>"
+    """Source text, dimmed. Escaped first: a `<` on the page is text, not markup."""
+    return f"<span style='color:{DIM}'>{html.escape(text)}</span>"
 
 
 def _passage_html(result: Result) -> str:
-    """The passage with context dimmed and the matching sentence bold."""
+    """The passage with context dimmed and the matching sentence bold.
+
+    Every piece of source text is HTML-escaped before it is wrapped in markup,
+    so a sentence containing `<` or `&` is shown exactly as the page has it.
+    """
     parts = []
     if result.before:
         parts.append(_dim(_truncate(result.before.text)))
@@ -76,7 +82,7 @@ def _passage_html(result: Result) -> str:
     body = []
     for position, sentence in enumerate(result.chunk.sentences):
         if position == result.best_sentence:
-            body.append(f"<strong>{sentence}</strong>")
+            body.append(f"<strong>{html.escape(sentence)}</strong>")
         else:
             body.append(_dim(sentence))
     parts.append(" ".join(body))
@@ -290,7 +296,7 @@ def _key_terms_section(tier: str) -> None:
 
 def _upgrade_stale_sources(source: str | None) -> None:
     """Rebuild any in-scope source indexed by an older pipeline, with a page bar."""
-    scoped = [resolve_source(source)] if source else list_sources()
+    scoped = resolve_sources(source) if source else list_sources()
     if not any(meta.index_version < INDEX_VERSION for meta in scoped):
         return
     bar = st.progress(0.0, text="Re-indexing…")
@@ -348,7 +354,7 @@ def _ensure_tier(tier: str, source: str | None) -> bool:
     A search at a tier the library lacks is not started silently: the gap and
     its cost are shown and the search waits for "Embed now".
     """
-    scoped = [resolve_source(source)] if source else list_sources()
+    scoped = resolve_sources(source) if source else list_sources()
     gap = tier_gap(tier, scoped)
     if gap.is_empty:
         return True
@@ -359,8 +365,17 @@ def _ensure_tier(tier: str, source: str | None) -> bool:
     return True
 
 
+def _source_label(meta: SourceMeta | None) -> str:
+    """How a source is named in the filter: title and filename, never just the title.
+
+    A book added as one PDF per chapter shares a title across sources; the
+    filename tells them apart, and the filter returns the source id.
+    """
+    return "All sources" if meta is None else f"{meta.title} — {meta.filename}"
+
+
 def _sidebar() -> tuple[str, str | None]:
-    """Library management. Returns the chosen tier and source filter.
+    """Library management. Returns the chosen tier and the chosen source id.
 
     Every widget carries an explicit `key`. Without one, Streamlit identifies a
     widget by its position in the tree, and this sidebar changes shape as soon
@@ -382,9 +397,10 @@ def _sidebar() -> tuple[str, str | None]:
         sources = list_sources()
         if sources:
             st.caption(_tiers_summary(sources))
-            names = ["All sources"] + [s.title for s in sources]
-            chosen = st.selectbox("Search in", names, key="source_filter")
-            source = None if chosen == "All sources" else chosen
+            chosen = st.selectbox(
+                "Search in", [None, *sources], format_func=_source_label, key="source_filter"
+            )
+            source = None if chosen is None else chosen.source_id
         else:
             source = None
             st.caption("No sources yet. Add a PDF on the right.")
@@ -417,14 +433,20 @@ def _sidebar() -> tuple[str, str | None]:
             for meta in sources:
                 columns = st.columns([5, 1])
                 columns[0].markdown(
-                    f"**{meta.title}**  \n"
-                    f"<span style='color:{DIM}'>{meta.author or 'unknown author'} · "
+                    f"**{html.escape(meta.title)}**  \n"
+                    f"<span style='color:{DIM}'>{html.escape(meta.author or 'unknown author')} · "
                     f"{meta.page_count} pages · {', '.join(meta.tiers)}</span>",
                     unsafe_allow_html=True,
                 )
-                if columns[1].button("✕", key=f"rm-{meta.source_id}", help="Remove"):
-                    remove(meta.source_id)
-                    st.rerun()
+                # Deleting an index is a click away, so the ✕ opens a confirmation
+                # rather than acting at once.
+                with columns[1].popover("✕", help="Remove"):
+                    confirm = st.button(
+                        f"Remove {meta.title}", type="primary", key=f"rm-{meta.source_id}"
+                    )
+                    if confirm:
+                        remove(meta.source_id)
+                        st.rerun()
 
         st.divider()
         st.caption(f"dsearch {__version__} — retrieval only, no text is generated.")
@@ -460,25 +482,31 @@ def main() -> None:
 
     # Clicking "Embed now" reruns the script, so the search that asked for it
     # is remembered in session state and resumed once the tier is present.
+    # Its results are remembered too: every later widget change reruns the
+    # script, and those reruns show the same results rather than searching again.
     if st.button("Search", type="primary", key="search") and query.strip():
         st.session_state["pending"] = {"query": query, "k": k, "tier": tier, "source": source}
+        st.session_state.pop("results", None)
     pending = st.session_state.get("pending")
     if not pending:
         if not sources:
             st.info("Add a PDF in the sidebar to get started.")
         return
 
-    try:
-        _upgrade_stale_sources(pending["source"])
-        if not _ensure_tier(pending["tier"], pending["source"]):
+    results = st.session_state.get("results")
+    if results is None:
+        try:
+            _upgrade_stale_sources(pending["source"])
+            if not _ensure_tier(pending["tier"], pending["source"]):
+                return
+            with st.spinner("Searching…"):
+                results = search(
+                    pending["query"], k=pending["k"], tier=pending["tier"], source=pending["source"]
+                )
+        except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
+            st.error(str(exc))
             return
-        with st.spinner("Searching…"):
-            results = search(
-                pending["query"], k=pending["k"], tier=pending["tier"], source=pending["source"]
-            )
-    except (SourceNotFoundError, AmbiguousSourceError, ValueError) as exc:
-        st.error(str(exc))
-        return
+        st.session_state["results"] = results
     tier = pending["tier"]
 
     if not results:

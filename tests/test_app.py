@@ -7,7 +7,15 @@ which is where a bug would silently misrepresent the evidence.
 
 from __future__ import annotations
 
-from dsearch import app
+import zlib
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+import pytest
+from streamlit.testing.v1 import AppTest
+
+from dsearch import app, index, search
 from dsearch.chunk import Chunk
 from dsearch.index import AddResult, SourceMeta
 from dsearch.search import Result
@@ -78,6 +86,17 @@ class TestPassageHtml:
     def test_omits_context_when_absent(self):
         html = app._passage_html(make_result())
         assert "Before text." not in html
+
+    def test_source_text_is_escaped_not_rendered(self):
+        # A page that literally contains "<b>" or "&" must be shown as such;
+        # rendered as markup it would quote something the source does not say.
+        result = make_result(best=0)
+        sentences = ["Wages fell <below> the 1990s level & stayed there.", *SENTENCES[1:]]
+        result.chunk = replace(result.chunk, sentences=sentences, text=" ".join(sentences))
+        html = app._passage_html(result)
+        assert "&lt;below&gt;" in html
+        assert "&amp; stayed" in html
+        assert "<below>" not in html
 
     def test_every_sentence_appears_verbatim(self):
         # The passage shown must be exactly the source's sentences.
@@ -323,3 +342,95 @@ class TestTermsHeading:
 
     def test_omits_an_unknown_author(self):
         assert "—" not in app._terms_heading(BookTerms(title="Untitled", author=""))
+
+
+class TestSourceLabel:
+    def test_names_title_and_filename(self):
+        meta = make_result().meta
+        assert app._source_label(meta) == "Fresh Fruit, Broken Bodies — ffbb.pdf"
+
+    def test_none_means_all_sources(self):
+        assert app._source_label(None) == "All sources"
+
+
+def fake_embed(texts, tier=index.DEFAULT_TIER, *, pages=None, page_count=None, progress=None):
+    """Deterministic hashed bag-of-words, so the app runs with no model."""
+    dim = 16
+    out = np.zeros((len(texts), dim), dtype=np.float32)
+    for row, text in enumerate(texts):
+        for token in text.lower().split():
+            out[row, zlib.crc32(token.encode()) % dim] += 1.0
+    if progress and page_count:
+        progress(page_count, page_count)
+    norms = np.linalg.norm(out, axis=1, keepdims=True)
+    return out / np.maximum(norms, 1e-9)
+
+
+class TestRunningApp:
+    """The script itself, driven through Streamlit's AppTest.
+
+    The library is a temp directory and the embedder is stubbed, so this is
+    the same offline setup as the CLI tests, but exercising real widgets.
+    """
+
+    BODY = (
+        "The clinic dismissed his knee pain without an examination. "
+        "He returned to the strawberry rows before dawn the next morning."
+    )
+
+    @pytest.fixture
+    def chapters(self, tmp_path, monkeypatch, pdf_factory):
+        monkeypatch.setenv("DSEARCH_HOME", str(tmp_path / "lib"))
+        monkeypatch.setattr(index, "embed_texts", fake_embed)
+        monkeypatch.setattr(search, "embed_texts", fake_embed)
+        metas = []
+        for n in (1, 2):
+            path = pdf_factory(name=f"ch{n}.pdf", pages=[f"{self.BODY} Chapter {n}."] * 2)
+            metas.append(index.add(path, title="Shared Title", author="Holmes").meta)
+        return metas
+
+    @pytest.fixture
+    def counted_search(self, monkeypatch):
+        calls: list[dict] = []
+        real = search.search
+
+        def counting(query, k=search.DEFAULT_K, **kwargs):
+            calls.append({"query": query, "k": k, **kwargs})
+            return real(query, k, **kwargs)
+
+        monkeypatch.setattr(search, "search", counting)
+        return calls
+
+    def run_app(self) -> AppTest:
+        at = AppTest.from_file(str(Path(app.__file__)), default_timeout=30)
+        return at.run()
+
+    def test_filtering_by_one_file_of_a_shared_title_works(self, chapters, counted_search):
+        at = self.run_app()
+        assert not at.exception
+        picker = at.selectbox(key="source_filter")
+        assert picker.options[1:] == [app._source_label(m) for m in chapters]
+
+        picker.select_index(2)
+        at.text_area(key="query").input("knee pain")
+        at.button(key="search").click().run()
+
+        assert not at.exception, at.exception
+        assert counted_search[-1]["source"] == chapters[1].source_id
+        assert any("Chapter 2" in block.value for block in at.markdown)
+        assert not any("matches several" in e.value for e in at.error)
+
+    def test_other_widgets_do_not_rerun_the_search(self, chapters, counted_search):
+        at = self.run_app()
+        at.text_area(key="query").input("knee pain")
+        at.button(key="search").click().run()
+        assert len(counted_search) == 1
+
+        at.slider(key="k").set_value(3).run()
+        assert not at.exception
+        assert len(counted_search) == 1  # results were kept, not recomputed
+        assert any("Chapter" in block.value for block in at.markdown)
+
+        at.button(key="search").click().run()
+        assert len(counted_search) == 2  # a new click does search again
+        assert counted_search[-1]["k"] == 3

@@ -462,3 +462,31 @@ page. What follows is what that left open.
 - **CPU-only `torch` is installed before the package.** On Linux the default
   wheel bundles CUDA libraries the tests never use; the CPU index keeps the
   install small.
+
+## Source filters and rendering (v0.2 fixes)
+
+- **A title shared by several sources names the whole book for `search`,
+  `embed`, and `terms`; `remove` and `edit` still demand one match.** The
+  README tells readers to add a book as one PDF per chapter under one title,
+  and the first thing they then do is filter a search to that title — which
+  raised "matches several sources". `resolve_sources` returns every match when
+  all share a title and stays ambiguous otherwise; `resolve_source` is
+  unchanged for the two commands that are about to delete or rewrite
+  something.
+- **The web UI's source filter lists "title — filename" and returns the
+  source id.** Two chapters with the same title were indistinguishable in the
+  dropdown, and the title it returned was ambiguous. The id resolves exactly.
+- **Source text is HTML-escaped in the app and markup-escaped in CLI errors.**
+  A passage is shown through `unsafe_allow_html` so that it can be dimmed and
+  bolded; without escaping, a `<` on the page became markup and the quote no
+  longer matched the source. Rich reads `[...]` as style tags, so a filename
+  or user input printed raw could lose characters.
+- **The app keeps the last results in session state and searches only on a
+  click.** Streamlit reruns the script on every widget change; the pending
+  request survived reruns (so "Embed now" could resume it) but so did the
+  search itself, which reloaded the corpus and re-embedded on each slider
+  move. A new click drops the cached results.
+- **The app's ✕ opens a confirmation popover.** Removing an index is cheap to
+  redo but slow to rebuild, and the button sat beside the library list.
+- **The Streamlit script is tested with `AppTest`**, not only its helpers. The
+  source-filter bug lived in widget wiring that no helper test could reach.
