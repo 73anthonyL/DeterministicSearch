@@ -72,7 +72,18 @@ class TestHelpAndVersion:
     def test_help_lists_every_command(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        for command in ("add", "edit", "list", "remove", "search", "terms", "doctor", "demo", "ui"):
+        for command in (
+            "add",
+            "edit",
+            "list",
+            "remove",
+            "search",
+            "stats",
+            "terms",
+            "doctor",
+            "demo",
+            "ui",
+        ):
             assert command in result.output
 
     def test_version(self):
@@ -327,6 +338,32 @@ class TestUi:
         assert result.exit_code == 1
         assert "deterministic-search[ui]" in result.output
         assert "Traceback" not in result.output
+
+
+class TestStats:
+    def test_empty_library_points_at_add(self):
+        result = runner.invoke(app, ["stats"])
+        assert result.exit_code == 0
+        assert "empty" in result.output
+
+    def test_reports_totals_and_tiers(self, added):
+        result = runner.invoke(app, ["stats"])
+        assert result.exit_code == 0, result.output
+        assert "1 source(s)" in result.output
+        assert "5 pages" in result.output
+        assert "fast" in result.output
+        assert "1/1" in result.output  # the fast tier covers the one source
+        assert "0/1" in result.output  # balanced and best do not
+
+    def test_stats_json(self, added):
+        result = runner.invoke(app, ["stats", "--json"])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["sources"] == 1
+        assert payload["pages"] == 5
+        assert payload["tier_sources"]["fast"] == 1
+        assert payload["tier_bytes"]["fast"] > 0
+        assert payload["chunks_per_page"] > 0
 
 
 class TestJsonOutput:

@@ -66,6 +66,7 @@ from dsearch.index import (
 from dsearch.sample import SAMPLE_AUTHOR, SAMPLE_QUERY, SAMPLE_TITLE, copy_sample
 from dsearch.search import DEFAULT_K, Result, load_corpus
 from dsearch.search import search as run_search
+from dsearch.stats import library_stats
 from dsearch.terms import DEFAULT_TOP, BookTerms, key_terms
 
 # Context from a neighbouring chunk is trimmed to this many characters so a
@@ -408,6 +409,38 @@ def list_command(
         )
     console.print(table)
     console.print(f"\n[dim]{len(sources)} source(s) in {home()}[/dim]")
+
+
+@app.command()
+def stats(
+    json_output: Annotated[bool, typer.Option("--json", help=_JSON_HELP)] = False,
+) -> None:
+    """Show library totals and how much disk each quality tier uses."""
+    info = library_stats()
+    if json_output:
+        _emit_json({"library": str(home()), **info.to_dict()})
+        return
+    if not info.sources:
+        console.print("[dim]Your library is empty. Add a PDF with[/dim] dsearch add <file.pdf>")
+        return
+
+    console.print(
+        f"[bold]{info.sources}[/bold] source(s)  ·  [bold]{info.pages}[/bold] pages  ·  "
+        f"[bold]{info.chunks}[/bold] chunks ({info.chunks_per_page:.1f} per page)  ·  "
+        f"{format_bytes(info.total_bytes)} on disk"
+    )
+    table = Table(box=None, pad_edge=False, header_style="bold")
+    for column in ("Tier", "Sources", "Vectors"):
+        table.add_column(column, justify="left" if column == "Tier" else "right")
+    for tier in TIERS:
+        table.add_row(
+            tier,
+            f"{info.tier_sources[tier]}/{info.sources}",
+            format_bytes(info.tier_bytes[tier]),
+        )
+    console.print()
+    console.print(table)
+    console.print(f"\n[dim]{home()}[/dim]")
 
 
 @app.command()

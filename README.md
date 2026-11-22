@@ -133,6 +133,7 @@ $ dsearch --help
 ╭─ Commands ─────────────────────────────────────────────────────────────────╮
 │ add     Index one or more PDFs into your library.                          │
 │ list    Show every source in your library.                                 │
+│ stats   Show library totals and how much disk each quality tier uses.      │
 │ edit    Change a source's author or title.                                 │
 │ remove  Delete a source from your library.                                 │
 │ search  Find page-cited passages that answer a query.                      │
@@ -209,6 +210,24 @@ ea63ed8d  Fresh Fruit, Broken Bodies  Seth Holmes     43     407  fast          
 
 The Tiers column is read from the vector files on disk, so it always says
 which tiers a search can use without waiting.
+
+### `stats` — how big is the library
+
+```
+$ dsearch stats
+1 source(s)  ·  31 pages  ·  259 chunks (8.4 per page)  ·  703.7 KB on disk
+
+Tier      Sources   Vectors
+fast          1/1  388.6 KB
+balanced      0/1       0 B
+best          0/1       0 B
+
+~/.dsearch
+```
+
+Reads files already on disk, so it is instant and never loads a model. The
+Sources column is how many sources have vectors for that tier, which is what
+`dsearch embed --tier ...` fills in. `--json` prints the same numbers.
 
 ### `search` — find evidence
 
@@ -404,7 +423,7 @@ Paste it into a bug report. `--json` gives the same as data.
 
 ### Machine-readable output and logging
 
-`list`, `search`, and `terms` take `--json`. A search result carries the
+`list`, `stats`, `search`, and `terms` take `--json`. A search result carries the
 passage, its page, its neighbours, and the MLA, in-text, and quoted-line
 citations:
 
