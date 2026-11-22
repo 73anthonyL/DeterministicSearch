@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `dsearch stats` prints library totals (sources, pages, chunks, disk use) and
+  the vector size per quality tier; `--json` for scripts.
+
 ## [0.2.0] - 2026-10-16
 
 ### Added
